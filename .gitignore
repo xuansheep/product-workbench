@@ -4,5 +4,7 @@ dist/
 .tmp/
 storage/prototypes/
 storage/data.json
+storage/*.db*
+storage/.temp_uploads/
 *.log
 .DS_Store

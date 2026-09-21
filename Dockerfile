@@ -5,13 +5,13 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# 优先拷贝依赖定义文件，最大化利用 Docker 缓存层
-COPY package*.json ./
-COPY server/package*.json ./server/
-COPY client/package*.json ./client/
+# 优先拷贝依赖定义文件，避开宿主机 Windows package-lock.json 平台架构锁定
+COPY package.json ./
+COPY server/package.json ./server/
+COPY client/package.json ./client/
 
-# 在 Linux Alpine 环境下安装全部构建依赖（纯 JS/TS 依赖，无 C++ 编译）
-RUN npm install
+# 在 Linux Alpine 环境下安装全部构建依赖，并确保 musl 架构下的 Rollup 原生模块就绪
+RUN npm install && npm --prefix client install --save-optional @rollup/rollup-linux-x64-musl
 
 # 拷贝全量源代码
 COPY . .
@@ -31,10 +31,10 @@ ENV PORT=9030
 ENV WORKBENCH_STORAGE_DIR=/app/storage
 ENV WORKBENCH_DB_PATH=/app/storage/workbench.db
 
-# 拷贝依赖配置并仅安装生产运行依赖
-COPY package*.json ./
-COPY server/package*.json ./server/
-COPY client/package*.json ./client/
+# 拷贝依赖配置并仅安装生产运行依赖（纯 Node.js 服务端依赖，无前端构建工具）
+COPY package.json ./
+COPY server/package.json ./server/
+COPY client/package.json ./client/
 
 RUN npm install --omit=dev && npm cache clean --force
 
