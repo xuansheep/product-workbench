@@ -1,0 +1,8 @@
+.idea/*
+node_modules/
+dist/
+.tmp/
+storage/prototypes/
+storage/data.json
+*.log
+.DS_Store
