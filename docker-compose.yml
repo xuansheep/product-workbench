@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  product-workbench:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: product-workbench:latest
+    container_name: product-workbench
+    restart: unless-stopped
+    ports:
+      - "9030:9030"
+    volumes:
+      # 持久化存储挂载：数据库文件与原型静态资源安全保存在宿主机 ./storage 目录
+      - ./storage:/app/storage
+    environment:
+      - PORT=9030
+      - NODE_ENV=production
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9030/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

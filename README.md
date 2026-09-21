@@ -20,62 +20,107 @@
    - 顶部工具栏提供快捷版本下拉切换器，随时回溯历史版本页面及对应历史评论。
 
 4. **高精度视口批注与侧边栏协作**
-   - **任意坐标批注**：开启批注模式后（快捷键 `C`），在原型任意位置点击落点，记录归一化相对百分比坐标（`x%`, `y%`）。
-   - **标号 Pin 呈现**：原型画布上以数字标号（① ② ③...）直观呈现，悬停展示预览气泡。
+   - **批注模式（快捷键 C / Esc退出）**：开启批注模式后，在原型任意位置点击落点，记录归一化相对百分比坐标与吸附元素。
+   - **标号 Pin 呈现**：原型画布上以数字标号直观呈现，平滑跟随，悬停展示预览气泡。
    - **独立评论抽屉**：右侧抽屉展示所有评论线索（Thread），支持多级回复互动、状态切换（待处理 / 已解决）与版本筛选。
-   - **双向联动**：点击画布上的 Pin 侧栏高亮定位，点击侧栏卡片画布 Pin 呈现脉冲对焦动画。
+   - **鼠标右键便捷退出**：右键单击即可一键退出批注模式并关闭激活卡片。
 
 5. **多端响应式视口模拟**
-   - 原型工作台顶部支持一键切换：
-     - **流动全屏 (100%)**
-     - **MacBook (1440 × 900)**
-     - **iPad Pro (820 × 1080)**
-     - **iPhone 16 (390 × 844)**
+   - 原型工作台顶部支持一键切换：流动自适应 (100%)、MacBook (1440 × 900)、iPad (820 × 1080)、iPhone (393 × 852)。
 
 6. **回收站机制**
    - 原型删除后采用软删除进入回收站，防止误删事故。
-   - 回收站内支持一键“还原”，或选择“彻底删除”清理磁盘静态资源。
+   - 回收站内支持一键“还原”，或选择“彻底删除”清理物理资源。
 
 7. **免注册轻量账户系统**
-   - 基于浏览器本地缓存（LocalStorage），无需繁琐注册流程。
-   - 精选 12 款现代预设头像（PM、UI、UX、前端、全栈、QA 等角色），支持自定义姓名，参与评论时自动携带个人身份。
+   - 基于浏览器本地缓存（LocalStorage），支持自定义昵称与 32 款精致预设头像（紧凑双排、平滑展开）。
 
 ---
 
-## 快速启动
+## Docker 容器化部署（推荐）
+
+项目全面支持容器化部署，采用 **`node:22-alpine`** 多阶段轻量构建，纯 JavaScript/TypeScript 运行时，**零 C++ 编译、零 Python/GCC 依赖**，秒级部署。
+
+### 一键脚本部署（自动检查与重启）
+在项目根目录下执行部署脚本，脚本将**自动构建镜像**，并根据容器存在状态自动选择启动或重启：
+```bash
+# 添加执行权限
+chmod +x deploy.sh
+
+# 执行部署（容器不存在则 run，已存在则 restart）
+./deploy.sh
+
+# 若更新了代码需要以最新镜像重建容器，运行：
+./deploy.sh --recreate
+```
+
+### 手动 Docker 命令
+
+#### 1. 构建镜像
+```bash
+docker build -t product-workbench:latest .
+```
+
+#### 2. 首次运行容器（绑定固定容器名与持久化存储）
+```bash
+docker run -d \
+  --name product-workbench \
+  --restart unless-stopped \
+  -p 9030:9030 \
+  -v "$(pwd)/storage:/app/storage" \
+  -e TZ=Asia/Shanghai \
+  product-workbench:latest
+```
+
+#### 3. 再次部署（存在则重启）
+```bash
+# 检查容器是否存在
+if docker ps -a --format '{{.Names}}' | grep -Eq "^product-workbench\$"; then
+  docker restart product-workbench
+else
+  docker run -d --name product-workbench --restart unless-stopped -p 9030:9030 -v "$(pwd)/storage:/app/storage" product-workbench:latest
+fi
+```
+
+### Docker Compose 部署
+```bash
+# 后台启动
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+
+# 停止服务
+docker compose down
+```
+
+启动后在浏览器中访问：`http://<服务器IP>:9030`
+
+---
+
+## 本地宿主机部署
 
 ### 环境要求
-- Node.js >= 18.0.0 (推荐 Node 20 / 22)
+- Node.js >= 22.5.0 (推荐 Node 22 或 24，内核内置 `node:sqlite`)
 - npm >= 9.0.0
 
 ### 安装依赖
 ```bash
-# 在项目根目录安装前后端所有依赖
 npm install
 ```
 
 ### 开发模式启动
 ```bash
-# 同时启动后端服务 (http://localhost:9030) 与前端热重载服务 (http://localhost:9031)
 npm run dev
 ```
 启动后在浏览器访问：`http://localhost:9031`
 
 ### 生产构建与单端口运行
 ```bash
-# 构建前端与后端
 npm run build
-
-# 单端口一站式启动 (http://localhost:9030)
 npm start
 ```
 打开浏览器访问：`http://localhost:9030`
-
-### 运行自动化测试
-```bash
-# 运行单元测试与端到端集成测试 (带超时防护)
-npm test
-```
 
 ---
 
@@ -83,21 +128,11 @@ npm test
 
 ```
 product-workbench/
+├── Dockerfile                  # node:22-alpine 多阶段生产构建镜像配置
+├── docker-compose.yml          # Docker Compose 编排文件
+├── deploy.sh                   # 自动化检查与部署脚本
 ├── client/                     # 前端应用 (React 18 + Vite + TailwindCSS + Lucide-react)
-│   ├── src/
-│   │   ├── components/         # Navbar, ProjectList, PrototypeList, PrototypeViewer 等
-│   │   ├── hooks/              # useAccount 本地缓存账户 Hook
-│   │   ├── services/           # api.ts RESTful 接口封装
-│   │   └── types/              # 实体与枚举类型
-├── server/                     # 后端服务 (Node.js + Express + TypeScript)
-│   ├── src/
-│   │   ├── db/                 # store.ts 数据持久化层
-│   │   ├── routes/             # 项目、原型、版本、评论、回收站路由
-│   │   ├── utils/              # archive.ts (zip 解压与入口探测)
-│   │   └── app.ts              # Express 实例与静态托管路由
-│   └── test/                   # 单元测试与端到端集成测试套件
-├── storage/                    # 物理磁盘数据与解压原型托管目录
-│   ├── data.json               # 业务持久化数据
-│   └── prototypes/             # 原型物理静态文件夹
+├── server/                     # 后端应用 (Node.js 22/24 + Express + node:sqlite 原生驱动)
+├── storage/                    # 物理磁盘数据挂载目录 (workbench.db 与原型解压文件)
 └── package.json
 ```
