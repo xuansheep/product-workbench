@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import Database, { type Database as DatabaseType } from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import type {
   WorkbenchData,
   Project,
@@ -29,8 +29,8 @@ const initialData: WorkbenchData = {
   projects: [
     {
       id: "p-sample",
-      name: "智能客服产品体验原型",
-      description: "包含对话流、知识库检索以及工单流转的原型设计",
+      name: "智能客服产品线原型",
+      description: "对话式知识库与智能质检流转系统原型集",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }
@@ -39,15 +39,15 @@ const initialData: WorkbenchData = {
     {
       id: "proto-sample",
       projectId: "p-sample",
-      name: "客服工单看板与AI流转",
-      description: "演示高保真客服工作台、设备视口切换与元素吸附批注",
+      name: "客服AI工作台",
+      description: "示例原型展示，包含多页面切换与文档坐标批注",
       currentVersionId: "v-sample-1",
       versions: [
         {
           id: "v-sample-1",
           versionNumber: 1,
           versionLabel: "v1.0",
-          changelog: "初始版本上线：核心看板与实时工单流",
+          changelog: "初始版本上线，支持实时交互",
           entryFile: "index.html",
           storageDir: "/prototypes/proto-sample/v1",
           createdAt: new Date().toISOString()
@@ -72,13 +72,13 @@ const initialData: WorkbenchData = {
       target: {
         selector: "#nav-to-detail",
         tagName: "A",
-        innerTextSnippet: "进入工单详情页",
+        innerTextSnippet: "进入详情页",
         elementOffsetXPercent: 50,
         elementOffsetYPercent: 50
       },
-      content: "右上角这个进入详情页的跳转链接非常清晰，方便做多页面评审验证！",
+      content: "右上角页面跳转链接响应非常迅速，验证通过。",
       author: {
-        name: "极客PM-体验官",
+        name: "极客PM-张工",
         avatar: "avatar-pm-1"
       },
       status: "open",
@@ -86,9 +86,9 @@ const initialData: WorkbenchData = {
         {
           id: "rpl-sample-1",
           commentId: "cmt-sample-1",
-          content: "收到，已支持多页面与 Hash 路由隔离。",
+          content: "收到，已支持多页面与 Hash 路由平滑吸附跟随。",
           author: {
-            name: "前端极客-小王",
+            name: "前端架构-小李",
             avatar: "avatar-dev-1"
           },
           createdAt: new Date().toISOString()
@@ -101,7 +101,7 @@ const initialData: WorkbenchData = {
 };
 
 class Store {
-  private db!: DatabaseType;
+  private db!: DatabaseSync;
 
   constructor(customDbPath?: string) {
     this.init(customDbPath);
@@ -113,14 +113,16 @@ class Store {
     }
 
     const targetDbPath = customDbPath || DB_FILE;
-    this.db = new Database(targetDbPath);
+    this.db = new DatabaseSync(targetDbPath);
 
-    // 生产级 SQLite PRAGMA 性能调优
-    this.db.pragma("journal_mode = WAL");       // WAL 预写日志：读写并发互不阻塞
-    this.db.pragma("foreign_keys = OFF");      // 应用层管理关联与级联，保障单元测试与灵活流转
-    this.db.pragma("synchronous = NORMAL");     // WAL 最佳实践：兼顾极高写入吞吐与断电安全性
-    this.db.pragma("busy_timeout = 5000");      // 高并发写冲突自动排队等待 5 秒
-    this.db.pragma("temp_store = MEMORY");      // 临时表与中间计算放内存
+    // Node 原生 SQLite 生产级 PRAGMA 性能调优
+    this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA foreign_keys = OFF;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA busy_timeout = 5000;
+      PRAGMA temp_store = MEMORY;
+    `);
 
     this.createSchema();
     this.checkAndMigrateLegacyData();
@@ -194,10 +196,23 @@ class Store {
     `);
   }
 
-  // 自动从历史 data.json 无损迁移数据（若数据库为空）
+  // 事务封装辅助
+  private transaction<T>(fn: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const res = fn();
+      this.db.exec("COMMIT");
+      return res;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  // 自动迁移历史 data.json 数据（若数据库为空）
   private checkAndMigrateLegacyData() {
-    const row = this.db.prepare("SELECT COUNT(*) as count FROM projects").get() as { count: number };
-    if (row.count > 0) return;
+    const row = this.db.prepare("SELECT COUNT(*) as count FROM projects").get() as any;
+    if (row && Number(row.count) > 0) return;
 
     let sourceData: WorkbenchData = initialData;
 
@@ -254,10 +269,10 @@ class Store {
       VALUES (@id, @commentId, @content, @authorJson, @createdAt)
     `);
 
-    const migrateTx = this.db.transaction(() => {
+    this.transaction(() => {
       const knownProjectIds = new Set<string>();
 
-      // 1. 导入项目
+      // 1. 项目
       for (const p of data.projects || []) {
         knownProjectIds.add(p.id);
         insertProject.run({
@@ -269,14 +284,13 @@ class Store {
         });
       }
 
-      // 2. 导入原型与版本（并自动修复历史孤儿项目的引用）
+      // 2. 原型与版本（自动修复历史孤儿项目引用）
       for (const proto of data.prototypes || []) {
         if (!knownProjectIds.has(proto.projectId)) {
-          // 自动补齐缺失的历史归档项目，保证数据不流失
           insertProject.run({
             id: proto.projectId,
-            name: "历史归档空间",
-            description: "数据迁移时自动补齐的归档项目",
+            name: "历史归档项目空间",
+            description: "迁移时自动生成的归档项目",
             createdAt: proto.createdAt || new Date().toISOString(),
             updatedAt: proto.updatedAt || new Date().toISOString()
           });
@@ -309,7 +323,7 @@ class Store {
         }
       }
 
-      // 3. 导入评论与回复
+      // 3. 评论回复
       for (const cmt of data.comments || []) {
         insertComment.run({
           id: cmt.id,
@@ -322,7 +336,7 @@ class Store {
           docY: typeof cmt.docY === "number" ? cmt.docY : null,
           targetJson: cmt.target ? JSON.stringify(cmt.target) : null,
           content: cmt.content,
-          authorJson: JSON.stringify(cmt.author || { name: "成员", avatar: "avatar-1" }),
+          authorJson: JSON.stringify(cmt.author || { name: "评审员", avatar: "avatar-1" }),
           status: cmt.status || "open",
           createdAt: cmt.createdAt || new Date().toISOString(),
           updatedAt: cmt.updatedAt || new Date().toISOString()
@@ -333,14 +347,13 @@ class Store {
             id: rep.id,
             commentId: cmt.id,
             content: rep.content,
-            authorJson: JSON.stringify(rep.author || { name: "成员", avatar: "avatar-1" }),
+            authorJson: JSON.stringify(rep.author || { name: "评审员", avatar: "avatar-1" }),
             createdAt: rep.createdAt || new Date().toISOString()
           });
         }
       }
     });
 
-    migrateTx();
     console.log("[SQLite] Legacy data migration completed successfully!");
   }
 
@@ -388,8 +401,8 @@ class Store {
   }
 
   public deleteProject(id: string): boolean {
-    const tx = this.db.transaction(() => {
-      // 软删除关联的原型
+    return this.transaction(() => {
+      // 级联软删除原型
       const now = new Date().toISOString();
       this.db.prepare(`
         UPDATE prototypes
@@ -398,9 +411,8 @@ class Store {
       `).run(now, id);
 
       const res = this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
-      return res.changes > 0;
+      return Number(res.changes) > 0;
     });
-    return tx();
   }
 
   // Prototypes
@@ -478,7 +490,7 @@ class Store {
   }
 
   public savePrototype(proto: Prototype): Prototype {
-    const tx = this.db.transaction(() => {
+    return this.transaction(() => {
       this.db.prepare(`
         INSERT INTO prototypes (
           id, project_id, name, description, current_version_id, is_deleted, deleted_at, created_at, updated_at
@@ -528,14 +540,13 @@ class Store {
           createdAt: ver.createdAt
         });
       }
-    });
 
-    tx();
-    return proto;
+      return proto;
+    });
   }
 
   public permanentDeletePrototype(id: string): boolean {
-    const tx = this.db.transaction(() => {
+    return this.transaction(() => {
       // 级联清理该原型关联的所有评论与回复
       this.db.prepare(`
         DELETE FROM comment_replies WHERE comment_id IN (
@@ -546,10 +557,8 @@ class Store {
       this.db.prepare("DELETE FROM comments WHERE prototype_id = ?").run(id);
       this.db.prepare("DELETE FROM prototype_versions WHERE prototype_id = ?").run(id);
       const res = this.db.prepare("DELETE FROM prototypes WHERE id = ?").run(id);
-      return res.changes > 0;
+      return Number(res.changes) > 0;
     });
-
-    return tx();
   }
 
   // Comments
@@ -634,7 +643,7 @@ class Store {
   }
 
   public saveComment(comment: Comment): Comment {
-    const tx = this.db.transaction(() => {
+    return this.transaction(() => {
       this.db.prepare(`
         INSERT INTO comments (
           id, prototype_id, version_id, page_path, x_percent, y_percent, doc_x, doc_y,
@@ -685,19 +694,17 @@ class Store {
           createdAt: rep.createdAt
         });
       }
-    });
 
-    tx();
-    return comment;
+      return comment;
+    });
   }
 
   public deleteComment(id: string): boolean {
-    const tx = this.db.transaction(() => {
+    return this.transaction(() => {
       this.db.prepare("DELETE FROM comment_replies WHERE comment_id = ?").run(id);
       const res = this.db.prepare("DELETE FROM comments WHERE id = ?").run(id);
-      return res.changes > 0;
+      return Number(res.changes) > 0;
     });
-    return tx();
   }
 
   // 兼容完整快照导出
