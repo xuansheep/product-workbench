@@ -67,7 +67,7 @@ docker run -d \
   --name product-workbench \
   --restart unless-stopped \
   -p 9030:9030 \
-  -v "$(pwd)/storage:/app/storage" \
+  -v workbench-storage:/app/storage \
   -e TZ=Asia/Shanghai \
   product-workbench:latest
 ```
@@ -78,7 +78,7 @@ docker run -d \
 if docker ps -a --format '{{.Names}}' | grep -Eq "^product-workbench\$"; then
   docker restart product-workbench
 else
-  docker run -d --name product-workbench --restart unless-stopped -p 9030:9030 -v "$(pwd)/storage:/app/storage" product-workbench:latest
+  docker run -d --name product-workbench --restart unless-stopped -p 9030:9030 -v workbench-storage:/app/storage product-workbench:latest
 fi
 ```
 
@@ -93,6 +93,29 @@ docker compose logs -f
 # 停止服务
 docker compose down
 ```
+
+### 关于持久化数据卷
+
+> **为什么用 named volume 而不是 `-v ./storage:/app/storage`？**
+> SQLite 的 WAL 模式依赖共享内存映射（mmap）与可靠的文件锁。当宿主机目录来自 NFS / SMB / FUSE
+> 等共享文件系统时，这些能力不可用，服务启动即报 `disk I/O error`（SQLite `SQLITE_IOERR`）。
+> 改用 Docker named volume 后，数据落在 `/var/lib/docker` 所在分区的本地文件系统上，不受此影响。
+
+`deploy.sh` 与 `docker-compose.yml` 统一使用固定卷名 `workbench-storage`，两种部署方式可随时互换。
+
+```bash
+# 查看数据卷的宿主机落盘位置
+docker volume inspect workbench-storage
+
+# 手动从旧的目录绑定方式迁移数据（把 ./storage 内容灌入数据卷）
+docker run --rm --entrypoint sh \
+  -v workbench-storage:/app/storage \
+  -v "$(pwd)/storage:/legacy-storage:ro" \
+  product-workbench:latest \
+  -c "cp -a /legacy-storage/. /app/storage/"
+```
+
+`deploy.sh` 已内置该迁移逻辑：当数据卷为空、且本地存在非空的 `./storage` 时会自动执行一次。
 
 启动后在浏览器中访问：`http://<服务器IP>:9030`
 
@@ -133,6 +156,6 @@ product-workbench/
 ├── deploy.sh                   # 自动化检查与部署脚本
 ├── client/                     # 前端应用 (React 18 + Vite + TailwindCSS + Lucide-react)
 ├── server/                     # 后端应用 (Node.js 22/24 + Express + node:sqlite 原生驱动)
-├── storage/                    # 物理磁盘数据挂载目录 (workbench.db 与原型解压文件)
+├── storage/                    # 本地直跑 (npm start) 的数据目录；容器部署请使用 named volume
 └── package.json
 ```

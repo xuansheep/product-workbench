@@ -48,7 +48,9 @@ RUN mkdir -p /app/storage
 # 暴露服务端口
 EXPOSE 9030
 
-# 声明外部持久化挂载卷
+# 声明持久化挂载点：生产部署请显式挂载 named volume（deploy.sh 与 docker-compose.yml 均使用
+# 固定的 workbench-storage 卷）。若启动时漏掉 -v，Docker 会创建一个匿名卷，数据不会丢在容器
+# 可写层，但难以定位，排查时先执行 docker volume ls 确认。
 VOLUME ["/app/storage"]
 
 # 容器健康检查

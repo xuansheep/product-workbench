@@ -115,14 +115,31 @@ class Store {
     const targetDbPath = customDbPath || DB_FILE;
     this.db = new DatabaseSync(targetDbPath);
 
-    // Node 原生 SQLite 生产级 PRAGMA 性能调优
+    // WAL 依赖共享内存映射与可靠的文件锁，在 NFS / SMB / FUSE 等网络或共享文件系统上
+    // 会直接抛 disk I/O error。此处单独设置，失败时降级为 DELETE 回滚日志模式，
+    // 避免服务因存储介质差异而彻底无法启动。
+    let journalMode: string;
+    try {
+      this.db.exec("PRAGMA journal_mode = WAL;");
+      // 回读实际生效的模式，防止个别环境静默忽略 WAL 设置
+      journalMode = (this.db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode;
+    } catch (err) {
+      console.warn(
+        `[SQLite] WAL 模式不可用，降级为 DELETE 模式 | db=${targetDbPath} storage=${STORAGE_DIR} reason=${(err as Error).message}`
+      );
+      this.db.exec("PRAGMA journal_mode = DELETE;");
+      journalMode = "delete";
+    }
+
+    // WAL 下 NORMAL 已足够安全；回滚日志模式下必须用 FULL，否则掉电有损坏数据库的风险
     this.db.exec(`
-      PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = OFF;
-      PRAGMA synchronous = NORMAL;
+      PRAGMA synchronous = ${journalMode === "wal" ? "NORMAL" : "FULL"};
       PRAGMA busy_timeout = 5000;
       PRAGMA temp_store = MEMORY;
     `);
+
+    console.log(`[SQLite] 数据库就绪 | db=${targetDbPath} | journal_mode=${journalMode}`);
 
     this.createSchema();
     this.checkAndMigrateLegacyData();

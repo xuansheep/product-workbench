@@ -11,8 +11,10 @@ services:
     ports:
       - "9030:9030"
     volumes:
-      # 持久化存储挂载：数据库文件与原型静态资源安全保存在宿主机 ./storage 目录
-      - ./storage:/app/storage
+      # 使用 Docker named volume 持久化，数据落在 /var/lib/docker 所在分区的本地文件系统上，
+      # 不经过宿主机目录绑定（bind mount）。原因：SQLite 的 WAL 模式依赖共享内存映射与
+      # 可靠的文件锁，在 NFS / SMB / FUSE 等共享文件系统上会直接抛 disk I/O error 导致启动失败。
+      - workbench-storage:/app/storage
     environment:
       - PORT=9030
       - NODE_ENV=production
@@ -23,3 +25,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+volumes:
+  # 固定卷名（不叠加 compose 项目名前缀），保证 deploy.sh 里的 docker run
+  # 与本文件使用同一个卷，两种方式来回切换时数据不丢。
+  workbench-storage:
+    name: workbench-storage
