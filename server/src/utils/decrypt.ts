@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 export function isEnveloped(buf: Buffer): boolean {
   if (buf.length < 26) return false;
@@ -35,16 +34,14 @@ function writeThenRead(data: Buffer, label: string): Buffer {
   }
 }
 
-function copyViaCmd(data: Buffer): Buffer | null {
-  if (process.platform !== "win32") return null;
-
+function copyThenRead(data: Buffer): Buffer | null {
   const stamp = `${process.pid}-${Date.now()}`;
   const source = path.join(os.tmpdir(), `workbench-import-src-${stamp}`);
   const copied = path.join(os.tmpdir(), `workbench-import-dst-${stamp}`);
 
   try {
     fs.writeFileSync(source, data);
-    execFileSync("cmd.exe", ["/c", "copy", "/b", source, copied], { stdio: "pipe", timeout: 20000 });
+    fs.copyFileSync(source, copied);
     return fs.readFileSync(copied);
   } catch {
     return null;
@@ -67,9 +64,9 @@ export function readUploadedFile(filePath: string): Buffer {
     return staged;
   }
 
-  const viaCmd = copyViaCmd(raw);
-  if (viaCmd && !isEnveloped(viaCmd)) {
-    return viaCmd;
+  const viaCopy = copyThenRead(raw);
+  if (viaCopy && !isEnveloped(viaCopy)) {
+    return viaCopy;
   }
-  return raw;
+  throw new Error("read file error");
 }
