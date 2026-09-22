@@ -5,7 +5,6 @@ import path from "node:path";
 import multer from "multer";
 import { store, STORAGE_DIR } from "../db/store.js";
 import { extractZipSafely } from "../utils/archive.js";
-import { readUploadedFile } from "../utils/decrypt.js";
 import type { Prototype, PrototypeVersion } from "../types.js";
 
 const router = Router();
@@ -49,7 +48,7 @@ router.post("/upload", upload.single("file"), (req, res) => {
   const originalExt = path.extname(file.originalname).toLowerCase();
 
   try {
-    const uploaded = readUploadedFile(file.path);
+    const uploaded = fs.readFileSync(file.path);
 
     if (originalExt === ".zip") {
       const extracted = extractZipSafely(uploaded, versionDir);
@@ -119,7 +118,7 @@ router.post("/:id/versions", upload.single("file"), (req, res) => {
   const originalExt = path.extname(file.originalname).toLowerCase();
 
   try {
-    const uploaded = readUploadedFile(file.path);
+    const uploaded = fs.readFileSync(file.path);
 
     if (originalExt === ".zip") {
       const extracted = extractZipSafely(uploaded, versionDir);
