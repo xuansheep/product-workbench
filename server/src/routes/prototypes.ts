@@ -5,6 +5,7 @@ import path from "node:path";
 import multer from "multer";
 import { store, STORAGE_DIR } from "../db/store.js";
 import { extractZipSafely } from "../utils/archive.js";
+import { readUploadedFile } from "../utils/decrypt.js";
 import type { Prototype, PrototypeVersion } from "../types.js";
 
 const router = Router();
@@ -48,13 +49,15 @@ router.post("/upload", upload.single("file"), (req, res) => {
   const originalExt = path.extname(file.originalname).toLowerCase();
 
   try {
+    const uploaded = readUploadedFile(file.path);
+
     if (originalExt === ".zip") {
-      const extracted = extractZipSafely(file.path, versionDir);
+      const extracted = extractZipSafely(uploaded, versionDir);
       entryFile = extracted.entryFile;
     } else {
       // 单文件 html 或其他
       const targetFileName = originalExt === ".html" || originalExt === ".htm" ? "index.html" : file.originalname;
-      fs.copyFileSync(file.path, path.join(versionDir, targetFileName));
+      fs.writeFileSync(path.join(versionDir, targetFileName), uploaded);
       entryFile = targetFileName;
     }
   } catch (err: any) {
@@ -116,12 +119,14 @@ router.post("/:id/versions", upload.single("file"), (req, res) => {
   const originalExt = path.extname(file.originalname).toLowerCase();
 
   try {
+    const uploaded = readUploadedFile(file.path);
+
     if (originalExt === ".zip") {
-      const extracted = extractZipSafely(file.path, versionDir);
+      const extracted = extractZipSafely(uploaded, versionDir);
       entryFile = extracted.entryFile;
     } else {
       const targetFileName = originalExt === ".html" || originalExt === ".htm" ? "index.html" : file.originalname;
-      fs.copyFileSync(file.path, path.join(versionDir, targetFileName));
+      fs.writeFileSync(path.join(versionDir, targetFileName), uploaded);
       entryFile = targetFileName;
     }
   } catch (err: any) {

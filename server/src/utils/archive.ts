@@ -7,14 +7,14 @@ export interface ExtractedPrototypeResult {
 }
 
 /**
- * 安全解压 Zip 文件，防御 Zip Slip 路径逃逸
+ * 安全解压 Zip 内容，防御 Zip Slip 路径逃逸
  */
-export function extractZipSafely(zipFilePath: string, targetDir: string): ExtractedPrototypeResult {
+export function extractZipSafely(zipBuffer: Buffer, targetDir: string): ExtractedPrototypeResult {
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
   }
 
-  const zip = new AdmZip(zipFilePath);
+  const zip = new AdmZip(zipBuffer);
   const zipEntries = zip.getEntries();
   const normalizedTargetDir = path.resolve(targetDir);
 

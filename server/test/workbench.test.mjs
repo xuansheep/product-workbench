@@ -73,7 +73,7 @@ describe("Product Workbench Backend Core Test Suite", { timeout: 10000 }, () => 
     zip.addFile("css/app.css", Buffer.from("h1 { color: red; }", "utf-8"));
     zip.writeZip(zipPath);
 
-    const result = extractZipSafely(zipPath, extractTarget);
+    const result = extractZipSafely(fs.readFileSync(zipPath), extractTarget);
     assert.strictEqual(result.entryFile, "index.html");
     assert.ok(fs.existsSync(path.join(extractTarget, "index.html")));
     assert.ok(fs.existsSync(path.join(extractTarget, "css/app.css")));
