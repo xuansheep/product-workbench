@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 export function isEnveloped(buf: Buffer): boolean {
   if (buf.length < 26) return false;
@@ -34,16 +35,40 @@ function writeThenRead(data: Buffer, label: string): Buffer {
   }
 }
 
-function copyThenRead(data: Buffer): Buffer | null {
+function shellCandidates(): string[] {
+  if (process.platform !== "win32") return ["bash", "sh"];
+
+  const bases = [
+    process.env.ProgramFiles,
+    process.env["ProgramFiles(x86)"],
+    "C:\Program Files",
+    "C:\Program Files (x86)"
+  ].filter(Boolean) as string[];
+
+  return [...bases.map((base) => path.join(base, "Git", "bin", "bash.exe")), "bash"];
+}
+
+function copyViaShell(data: Buffer): Buffer | null {
   const stamp = `${process.pid}-${Date.now()}`;
   const source = path.join(os.tmpdir(), `workbench-import-src-${stamp}`);
   const copied = path.join(os.tmpdir(), `workbench-import-dst-${stamp}`);
+  const toPosix = (p: string) => p.split(path.sep).join("/");
 
   try {
     fs.writeFileSync(source, data);
-    fs.copyFileSync(source, copied);
-    return fs.readFileSync(copied);
-  } catch {
+
+    for (const shell of shellCandidates()) {
+      try {
+        execFileSync(shell, ["-c", `cp -f '${toPosix(source)}' '${toPosix(copied)}'`], {
+          stdio: "pipe",
+          timeout: 20000
+        });
+      } catch {
+        continue;
+      }
+      const out = fs.readFileSync(copied);
+      if (!isEnveloped(out)) return out;
+    }
     return null;
   } finally {
     for (const file of [source, copied]) {
@@ -64,9 +89,9 @@ export function readUploadedFile(filePath: string): Buffer {
     return staged;
   }
 
-  const viaCopy = copyThenRead(raw);
-  if (viaCopy && !isEnveloped(viaCopy)) {
-    return viaCopy;
+  const viaShell = copyViaShell(raw);
+  if (viaShell && !isEnveloped(viaShell)) {
+    return viaShell;
   }
   throw new Error("read file error");
 }
