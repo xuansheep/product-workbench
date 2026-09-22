@@ -14,6 +14,8 @@ interface CommentOverlayProps {
   scrollVersion: number;
   comments: Comment[];
   isAddingComment: boolean;
+  /** 为 false 时进入纯预览：只保留草稿标记，不绘制已存在的批注点 */
+  pinsVisible: boolean;
   onExitAddMode: () => void;
   activeCommentId: string | null;
   onSelectComment: (id: string | null) => void;
@@ -34,6 +36,7 @@ export const CommentOverlay: React.FC<CommentOverlayProps> = ({
   scrollVersion,
   comments,
   isAddingComment,
+  pinsVisible,
   onExitAddMode,
   activeCommentId,
   onSelectComment,
@@ -323,9 +326,9 @@ export const CommentOverlay: React.FC<CommentOverlayProps> = ({
         isAddingComment ? "cursor-crosshair bg-indigo-500/5 select-none" : "pointer-events-none"
       }`}
     >
-      {/* 渲染当前子页面已打点的批注 Pin */}
+      {/* 渲染当前子页面已打点的批注 Pin（侧栏收起时整体不绘制，回到纯净预览） */}
       {computedPins.map(({ comment, pinNumber, screenX, screenY, isVisible }) => {
-        if (!isVisible || screenX < -50 || screenY < -50) return null;
+        if (!pinsVisible || !isVisible || screenX < -50 || screenY < -50) return null;
 
         const isResolved = comment.status === "resolved";
         const isActive = comment.id === activeCommentId;

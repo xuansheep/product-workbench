@@ -766,6 +766,7 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
                 scrollVersion={scrollVersion}
                 comments={comments}
                 isAddingComment={isAddingComment}
+                pinsVisible={isSidebarOpen}
                 onExitAddMode={() => setIsAddingComment(false)}
                 activeCommentId={activeCommentId}
                 onSelectComment={(id) => {
