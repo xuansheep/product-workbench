@@ -4,10 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
 
-// 严格沙箱隔离：单测使用独立的测试数据库与存储目录
+// 严格沙箱隔离：单测使用独立的数据文件与存储目录
 const tempDir = path.resolve(".tmp/test_workbench_runtime");
 const testStorageDir = path.join(tempDir, "storage");
-const testDbPath = path.join(testStorageDir, "test.db");
+const testDataPath = path.join(testStorageDir, "data.json");
 
 if (fs.existsSync(tempDir)) {
   fs.rmSync(tempDir, { recursive: true, force: true });
@@ -15,7 +15,7 @@ if (fs.existsSync(tempDir)) {
 fs.mkdirSync(testStorageDir, { recursive: true });
 
 process.env.WORKBENCH_STORAGE_DIR = testStorageDir;
-process.env.WORKBENCH_DB_PATH = testDbPath;
+process.env.WORKBENCH_DATA_PATH = testDataPath;
 
 const { store } = await import("../dist/db/store.js");
 const { detectEntryFile, extractZipSafely } = await import("../dist/utils/archive.js");

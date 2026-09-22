@@ -4,6 +4,7 @@ dist/
 .tmp/
 storage/prototypes/
 storage/data.json
+storage/data.json.tmp
 storage/*.db*
 storage/.temp_uploads/
 *.log

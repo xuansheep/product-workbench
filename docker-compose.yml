@@ -11,10 +11,10 @@ services:
     ports:
       - "9030:9030"
     volumes:
-      # 使用 Docker named volume 持久化，数据落在 /var/lib/docker 所在分区的本地文件系统上，
-      # 不经过宿主机目录绑定（bind mount）。原因：SQLite 的 WAL 模式依赖共享内存映射与
-      # 可靠的文件锁，在 NFS / SMB / FUSE 等共享文件系统上会直接抛 disk I/O error 导致启动失败。
-      - workbench-storage:/app/storage
+      # 绑定宿主机 ./storage 目录：业务数据只有 data.json 与 prototypes/ 两处，
+      # 备份、迁移、排查都直接在宿主机上完成。存储层为本地 JSON 文件（原子 rename 落盘），
+      # 不再依赖 SQLite WAL 所需的文件锁与 mmap，NFS / SMB / FUSE 共享目录同样可用。
+      - ./storage:/app/storage
     environment:
       - PORT=9030
       - NODE_ENV=production
@@ -25,9 +25,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-volumes:
-  # 固定卷名（不叠加 compose 项目名前缀），保证 deploy.sh 里的 docker run
-  # 与本文件使用同一个卷，两种方式来回切换时数据不丢。
-  workbench-storage:
-    name: workbench-storage

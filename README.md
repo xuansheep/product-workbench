@@ -39,7 +39,7 @@
 
 ## Docker 容器化部署（推荐）
 
-项目全面支持容器化部署，采用 **`node:22-alpine`** 多阶段轻量构建，纯 JavaScript/TypeScript 运行时，**零 C++ 编译、零 Python/GCC 依赖**，秒级部署。
+项目全面支持容器化部署，采用 **`node:16-alpine`** 多阶段轻量构建，纯 JavaScript/TypeScript 运行时，**零 C++ 编译、零 Python/GCC 依赖**，秒级部署。
 
 ### 一键脚本部署（自动检查与重启）
 在项目根目录下执行部署脚本，脚本将**自动构建镜像**，并根据容器存在状态自动选择启动或重启：
@@ -67,7 +67,7 @@ docker run -d \
   --name product-workbench \
   --restart unless-stopped \
   -p 9030:9030 \
-  -v workbench-storage:/app/storage \
+  -v "$(pwd)/storage:/app/storage" \
   -e TZ=Asia/Shanghai \
   product-workbench:latest
 ```
@@ -78,7 +78,7 @@ docker run -d \
 if docker ps -a --format '{{.Names}}' | grep -Eq "^product-workbench\$"; then
   docker restart product-workbench
 else
-  docker run -d --name product-workbench --restart unless-stopped -p 9030:9030 -v workbench-storage:/app/storage product-workbench:latest
+  docker run -d --name product-workbench --restart unless-stopped -p 9030:9030 -v "$(pwd)/storage:/app/storage" product-workbench:latest
 fi
 ```
 
@@ -94,28 +94,33 @@ docker compose logs -f
 docker compose down
 ```
 
-### 关于持久化数据卷
+### 关于持久化数据目录
 
-> **为什么用 named volume 而不是 `-v ./storage:/app/storage`？**
-> SQLite 的 WAL 模式依赖共享内存映射（mmap）与可靠的文件锁。当宿主机目录来自 NFS / SMB / FUSE
-> 等共享文件系统时，这些能力不可用，服务启动即报 `disk I/O error`（SQLite `SQLITE_IOERR`）。
-> 改用 Docker named volume 后，数据落在 `/var/lib/docker` 所在分区的本地文件系统上，不受此影响。
-
-`deploy.sh` 与 `docker-compose.yml` 统一使用固定卷名 `workbench-storage`，两种部署方式可随时互换。
+业务数据只有两处：`storage/data.json`（项目、原型版本、批注全部在内）与 `storage/prototypes/`（原型静态文件）。
+`data.json` 每次写入都是「同目录临时文件 + 原子 rename 替换」，不存在写到一半损坏的风险，服务运行中也能安全备份：
 
 ```bash
-# 查看数据卷的宿主机落盘位置
-docker volume inspect workbench-storage
+# 备份
+tar czf workbench-backup-$(date +%F).tar.gz storage/
 
-# 手动从旧的目录绑定方式迁移数据（把 ./storage 内容灌入数据卷）
-docker run --rm --entrypoint sh \
-  -v workbench-storage:/app/storage \
-  -v "$(pwd)/storage:/legacy-storage:ro" \
-  product-workbench:latest \
-  -c "cp -a /legacy-storage/. /app/storage/"
+# 恢复
+tar xzf workbench-backup-YYYY-MM-DD.tar.gz
 ```
 
-`deploy.sh` 已内置该迁移逻辑：当数据卷为空、且本地存在非空的 `./storage` 时会自动执行一次。
+`deploy.sh` 与 `docker-compose.yml` 统一绑定宿主机目录 `./storage`。
+
+> **从旧版本升级**：早期版本使用 SQLite（`workbench.db`），因其 WAL 模式依赖 mmap 与可靠文件锁、
+> 在 NFS / SMB / FUSE 上会抛 `disk I/O error`，当时改用 Docker named volume 承载。
+> 现已改为本地 JSON 文件存储（`data.json`），故改回目录绑定。
+>
+> **注意：新版不读写 SQLite，旧卷里的 `workbench.db` 不会被自动识别，也没有内置的自动转换。**
+> 升级前请先把旧卷数据拷到宿主机留档；新版本会从 `storage/data.json` 重新开始（首启会写入一份内置示例数据）。
+
+```bash
+# 把旧卷里的数据整体拷到宿主机目录留档
+docker run --rm -v workbench-storage:/from -v "$(pwd)/storage:/to" alpine \
+  sh -c "cp -a /from/. /to/"
+```
 
 启动后在浏览器中访问：`http://<服务器IP>:9030`
 
@@ -124,8 +129,8 @@ docker run --rm --entrypoint sh \
 ## 本地宿主机部署
 
 ### 环境要求
-- Node.js >= 22.5.0 (推荐 Node 22 或 24，内核内置 `node:sqlite`)
-- npm >= 9.0.0
+- Node.js >= 16.18.0（存储层为本地 JSON 文件，无任何原生模块依赖，Node 16 / 18 / 20 / 22 均可直接运行）
+- npm >= 8.0.0
 
 ### 安装依赖
 ```bash
@@ -151,11 +156,11 @@ npm start
 
 ```
 product-workbench/
-├── Dockerfile                  # node:22-alpine 多阶段生产构建镜像配置
+├── Dockerfile                  # node:16-alpine 多阶段生产构建镜像配置
 ├── docker-compose.yml          # Docker Compose 编排文件
 ├── deploy.sh                   # 自动化检查与部署脚本
 ├── client/                     # 前端应用 (React 18 + Vite + TailwindCSS + Lucide-react)
-├── server/                     # 后端应用 (Node.js 22/24 + Express + node:sqlite 原生驱动)
-├── storage/                    # 本地直跑 (npm start) 的数据目录；容器部署请使用 named volume
+├── server/                     # 后端应用 (Node.js 16.18+ + Express + 本地 JSON 文件存储)
+├── storage/                    # 数据目录：data.json 为全部业务数据，prototypes/ 为原型静态文件
 └── package.json
 ```

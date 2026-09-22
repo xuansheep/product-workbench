@@ -6,6 +6,12 @@
     "server",
     "client"
   ],
+  "engines": {
+    "node": ">=16.18.0"
+  },
+  "overrides": {
+    "postcss-load-config": "^4.0.2"
+  },
   "scripts": {
     "dev:server": "npm run dev --prefix server",
     "dev:client": "npm run dev --prefix client",
@@ -17,6 +23,6 @@
     "test": "npm run test --prefix server"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^8.2.2"
   }
 }

@@ -3,11 +3,14 @@ import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
+// 显式依赖 undici：Node 16 没有全局 fetch/FormData/Blob（需 --experimental-fetch，且无全局 Blob），
+// 固定使用同一份实现可让测试在 Node 16.18+ / 18 / 22 上行为完全一致。
+import { fetch, FormData, File } from "undici";
 
-// 严格沙箱隔离：注入独立测试存储目录与数据库路径，杜绝污染生产数据
+// 严格沙箱隔离：注入独立测试存储目录与数据文件路径，杜绝污染生产数据
 const tempDir = path.resolve(".tmp/e2e_test_runtime");
 const testStorageDir = path.join(tempDir, "storage");
-const testDbPath = path.join(testStorageDir, "test.db");
+const testDataPath = path.join(testStorageDir, "data.json");
 
 if (fs.existsSync(tempDir)) {
   fs.rmSync(tempDir, { recursive: true, force: true });
@@ -15,7 +18,7 @@ if (fs.existsSync(tempDir)) {
 fs.mkdirSync(testStorageDir, { recursive: true });
 
 process.env.WORKBENCH_STORAGE_DIR = testStorageDir;
-process.env.WORKBENCH_DB_PATH = testDbPath;
+process.env.WORKBENCH_DATA_PATH = testDataPath;
 
 const { createApp } = await import("../dist/app.js");
 
@@ -70,8 +73,7 @@ describe("Product Workbench End-to-End API Integration Suite", { timeout: 15000 
 
     // 2.3 使用 FormData 上传原型
     const formData = new FormData();
-    const zipBlob = new Blob([fs.readFileSync(zipPath)], { type: "application/zip" });
-    formData.append("file", zipBlob, "dashboard_v1.zip");
+    formData.append("file", new File([fs.readFileSync(zipPath)], "dashboard_v1.zip", { type: "application/zip" }));
     formData.append("projectId", projData.id);
     formData.append("name", "经营分析仪表盘");
     formData.append("description", "包含核心指标看板与经营图表");
@@ -99,8 +101,7 @@ describe("Product Workbench End-to-End API Integration Suite", { timeout: 15000 
     fs.writeFileSync(singleHtmlPath, "<!DOCTYPE html><html><body><h1>仪表盘原型 v2.0 升级版</h1></body></html>", "utf-8");
 
     const v2FormData = new FormData();
-    const htmlBlob = new Blob([fs.readFileSync(singleHtmlPath)], { type: "text/html" });
-    v2FormData.append("file", htmlBlob, "dashboard_v2.html");
+    v2FormData.append("file", new File([fs.readFileSync(singleHtmlPath)], "dashboard_v2.html", { type: "text/html" }));
     v2FormData.append("changelog", "增加图表多维下钻交互");
 
     const v2Res = await fetch(`${baseUrl}/api/prototypes/${protoData.id}/versions`, {

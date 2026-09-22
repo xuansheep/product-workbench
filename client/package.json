@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=16.18.0"
+  },
   "scripts": {
     "dev": "vite --port 9031 --host",
     "build": "tsc -b && vite build",
@@ -11,7 +14,6 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
-    "product-workbench-root": "file:..",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.5.5"
@@ -24,6 +26,6 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
     "typescript": "~5.7.2",
-    "vite": "^6.0.3"
+    "vite": "^4.5.14"
   }
 }
