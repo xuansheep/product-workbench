@@ -6,6 +6,7 @@ import {
   Archive,
   History,
   Trash2,
+  Edit2,
   Clock,
   ChevronRight,
   ArrowLeft,
@@ -21,6 +22,7 @@ interface PrototypeListProps {
   onOpenViewer: (proto: Prototype) => void;
   onUploadPrototype: (formData: FormData) => Promise<void>;
   onUploadNewVersion: (protoId: string, formData: FormData) => Promise<void>;
+  onUpdatePrototype: (id: string, name: string, description: string) => Promise<void>;
   onDeletePrototype: (protoId: string) => Promise<void>;
 }
 
@@ -31,11 +33,17 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
   onOpenViewer,
   onUploadPrototype,
   onUploadNewVersion,
+  onUpdatePrototype,
   onDeletePrototype
 }) => {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadTargetProto, setUploadTargetProto] = useState<Prototype | null>(null);
   const [deletingProtoId, setDeletingProtoId] = useState<string | null>(null);
+
+  const [editingProto, setEditingProto] = useState<Prototype | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
@@ -53,6 +61,27 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
     setChangelog(targetProto ? `迭代更新 v${targetProto.versions.length + 1}.0` : "初始版本上传");
     setSelectedFile(null);
     setIsUploadModalOpen(true);
+  };
+
+  const handleOpenEdit = (proto: Prototype, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingProto(proto);
+    setEditName(proto.name);
+    setEditDesc(proto.description);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProto || !editName.trim()) return;
+    setEditSaving(true);
+    try {
+      await onUpdatePrototype(editingProto.id, editName.trim(), editDesc.trim());
+      setEditingProto(null);
+    } catch (err: any) {
+      alert(err.message || "保存失败");
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   const handleFileDrop = (e: React.DragEvent) => {
@@ -178,6 +207,13 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                     </div>
 
                     <div className="flex items-center space-x-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => handleOpenEdit(proto, e)}
+                        title="编辑原型信息"
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -376,6 +412,79 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                   ) : (
                     <span>{uploadTargetProto ? "发布新版本" : "立即上传"}</span>
                   )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 编辑原型信息弹窗 */}
+      {editingProto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base">编辑原型信息</h3>
+                  <p className="text-xs text-slate-400">修改原型名称与简述，不影响已有版本与批注</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingProto(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
+                  原型名称 <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="例如：智能客服工单系统"
+                  required
+                  maxLength={50}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900 bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
+                  原型简述
+                </label>
+                <input
+                  type="text"
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="说明此原型的业务范围或模块..."
+                  maxLength={100}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900 bg-white"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingProto(null)}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving || !editName.trim()}
+                  className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition-colors disabled:opacity-50"
+                >
+                  {editSaving ? "保存中..." : "保存修改"}
                 </button>
               </div>
             </form>

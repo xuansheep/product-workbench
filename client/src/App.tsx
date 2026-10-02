@@ -179,6 +179,11 @@ export function App() {
     loadProjects();
   };
 
+  const handleUpdatePrototype = async (id: string, name: string, description: string) => {
+    const updated = await api.updatePrototype(id, { name, description });
+    setPrototypes((prev) => prev.map((p) => (p.id === id ? updated : p)));
+  };
+
   const handleUploadNewVersion = async (protoId: string, formData: FormData) => {
     const updatedProto = await api.uploadNewVersion(protoId, formData);
     setPrototypes((prev) => prev.map((p) => (p.id === protoId ? updatedProto : p)));
@@ -257,6 +262,7 @@ export function App() {
             onOpenViewer={navigateToPrototype}
             onUploadPrototype={handleUploadPrototype}
             onUploadNewVersion={handleUploadNewVersion}
+            onUpdatePrototype={handleUpdatePrototype}
             onDeletePrototype={handleDeletePrototype}
           />
         ) : (
