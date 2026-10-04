@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { WorkbenchData, Project, Prototype, Comment } from "../types.js";
+import type { WorkbenchData, Project, Prototype, Comment, Attachment } from "../types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,8 +86,20 @@ const initialData: WorkbenchData = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }
-  ]
+  ],
+  attachments: []
 };
+
+// 旧数据文件不含后加的顶层集合字段，缺失时统一回落到空数组。
+// 导出为纯函数以便直接单测：线上是「老文件能否启动」而不是「新装能否启动」。
+export function normalizeWorkbenchData(raw: any): WorkbenchData {
+  return {
+    projects: Array.isArray(raw?.projects) ? raw.projects : [],
+    prototypes: Array.isArray(raw?.prototypes) ? raw.prototypes : [],
+    comments: Array.isArray(raw?.comments) ? raw.comments : [],
+    attachments: Array.isArray(raw?.attachments) ? raw.attachments : []
+  };
+}
 
 // 与旧 SQLite 对 TEXT 列的字节序比较保持一致，避免排序语义发生漂移
 function compareText(a: string, b: string): number {
@@ -126,13 +138,13 @@ class Store {
   private load(): WorkbenchData {
     if (!fs.existsSync(this.dataFile)) {
       // 首次启动写入示例数据，保证前端有可浏览的初始内容
-      const seed = JSON.parse(JSON.stringify(initialData)) as WorkbenchData;
+      const seed = normalizeWorkbenchData(JSON.parse(JSON.stringify(initialData)));
       this.persist(seed);
       return seed;
     }
 
     try {
-      return JSON.parse(fs.readFileSync(this.dataFile, "utf-8")) as WorkbenchData;
+      return normalizeWorkbenchData(JSON.parse(fs.readFileSync(this.dataFile, "utf-8")));
     } catch (err) {
       // 解析失败必须让服务启动失败：静默重新播种会把「数据损坏」伪装成「全新开始」，
       // 用户随后的第一次写入就会真正覆盖掉原文件。
@@ -225,6 +237,8 @@ class Store {
       data.prototypes.splice(index, 1);
       // 级联清理该原型下的批注；回复内嵌在批注对象里，随之一起消失
       data.comments = data.comments.filter((c) => c.prototypeId !== id);
+      // 级联清理附件记录（磁盘文件由路由层同步清理）
+      data.attachments = data.attachments.filter((a) => a.prototypeId !== id);
       return true;
     });
   }
@@ -255,13 +269,49 @@ class Store {
     });
   }
 
+  // Attachments
+  // 不区分原型是否已软删除：彻底删除时需要按原型 id 反查并清理附件记录
+  public getAttachmentsByPrototype(prototypeId: string): Attachment[] {
+    return this.data.attachments
+      .filter((a) => a.prototypeId === prototypeId)
+      .sort((a, b) => compareText(b.createdAt, a.createdAt));
+  }
+
+  // 列表页一次性取全项目附件，避免每个卡片各发一次请求
+  public getAttachmentsByProject(projectId: string): Attachment[] {
+    const protoIds = new Set(
+      this.data.prototypes.filter((p) => p.projectId === projectId && !p.isDeleted).map((p) => p.id)
+    );
+    return this.data.attachments
+      .filter((a) => protoIds.has(a.prototypeId))
+      .sort((a, b) => compareText(b.createdAt, a.createdAt));
+  }
+
+  public getAttachmentById(id: string): Attachment | undefined {
+    return this.data.attachments.find((a) => a.id === id);
+  }
+
+  public saveAttachment(attachment: Attachment): Attachment {
+    return this.mutate((data) => this.upsert(data.attachments, attachment));
+  }
+
+  public deleteAttachment(id: string): boolean {
+    return this.mutate((data) => {
+      const index = data.attachments.findIndex((a) => a.id === id);
+      if (index === -1) return false;
+      data.attachments.splice(index, 1);
+      return true;
+    });
+  }
+
   // 兼容完整快照导出
   public getData(): WorkbenchData {
     const prototypes = this.getPrototypes(undefined, false).concat(this.getPrototypes(undefined, true));
     return {
       projects: this.getProjects(),
       prototypes,
-      comments: prototypes.flatMap((proto) => this.getComments(proto.id))
+      comments: prototypes.flatMap((proto) => this.getComments(proto.id)),
+      attachments: prototypes.flatMap((proto) => this.getAttachmentsByPrototype(proto.id))
     };
   }
 }

@@ -3,6 +3,7 @@ node_modules/
 dist/
 .tmp/
 storage/prototypes/
+storage/attachments/
 storage/data.json
 storage/data.json.tmp
 storage/*.db*

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Upload,
   Plus,
@@ -10,10 +10,14 @@ import {
   Clock,
   ChevronRight,
   ArrowLeft,
-  Info
+  Info,
+  Paperclip
 } from "lucide-react";
-import { type Project, type Prototype } from "../types/index.js";
+import { type Project, type Prototype, type Attachment } from "../types/index.js";
+import { api } from "../services/api.js";
 import { ConfirmModal } from "./common/ConfirmModal.js";
+import { AttachmentList } from "./common/AttachmentList.js";
+import { AttachmentModal } from "./common/AttachmentModal.js";
 
 interface PrototypeListProps {
   project: Project;
@@ -45,6 +49,10 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
   const [editDesc, setEditDesc] = useState("");
   const [editSaving, setEditSaving] = useState(false);
 
+  // 附件按原型 id 分组缓存，列表页一次请求取全，避免每张卡片各发一次
+  const [attachmentsByProto, setAttachmentsByProto] = useState<Record<string, Attachment[]>>({});
+  const [attachmentTargetProto, setAttachmentTargetProto] = useState<Prototype | null>(null);
+
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [changelog, setChangelog] = useState("");
@@ -53,6 +61,42 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
   const [uploading, setUploading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // 附件加载失败不该拖垮卡片列表，记录日志后按空列表渲染即可
+    api
+      .getAttachmentsByProject(project.id)
+      .then((list) => {
+        const grouped: Record<string, Attachment[]> = {};
+        for (const att of list) {
+          if (!grouped[att.prototypeId]) grouped[att.prototypeId] = [];
+          grouped[att.prototypeId].push(att);
+        }
+        setAttachmentsByProto(grouped);
+      })
+      .catch((err) => console.error("Failed to load attachments:", err));
+  }, [project.id]);
+
+  const handleAddAttachment = async (formData: FormData) => {
+    if (!attachmentTargetProto) return;
+    const created = await api.addAttachment(attachmentTargetProto.id, formData);
+    setAttachmentsByProto((prev) => ({
+      ...prev,
+      [created.prototypeId]: [created, ...(prev[created.prototypeId] || [])]
+    }));
+  };
+
+  const handleDeleteAttachment = async (protoId: string, id: string) => {
+    try {
+      await api.deleteAttachment(id);
+      setAttachmentsByProto((prev) => ({
+        ...prev,
+        [protoId]: (prev[protoId] || []).filter((a) => a.id !== id)
+      }));
+    } catch (err: any) {
+      alert(err.message || "附件删除失败");
+    }
+  };
 
   const handleOpenUpload = (targetProto?: Prototype) => {
     setUploadTargetProto(targetProto || null);
@@ -184,6 +228,7 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
               proto.versions.find((v) => v.id === proto.currentVersionId) ||
               proto.versions[0] ||
               { versionLabel: "v1.0", changelog: "初始版本" };
+            const protoAttachments = attachmentsByProto[proto.id] || [];
             return (
               <div
                 key={proto.id}
@@ -257,9 +302,54 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                     <Clock className="w-3.5 h-3.5" />
                     <span>{new Date(proto.updatedAt).toLocaleDateString()}</span>
                   </div>
+
+                  {/* 常驻附件入口：没有附件时也要露出，否则用户无从发现可以从卡片添加 */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAttachmentTargetProto(proto);
+                    }}
+                    title="管理关联附件"
+                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md transition-colors hover:text-indigo-600 hover:bg-indigo-50 ${
+                      protoAttachments.length > 0 ? "text-indigo-500 font-semibold" : ""
+                    }`}
+                  >
+                    <Paperclip className="w-3.5 h-3.5" />
+                    <span>{protoAttachments.length}</span>
+                  </button>
+
                   <div className="flex items-center space-x-1 font-semibold text-indigo-600 group-hover:translate-x-0.5 transition-transform">
                     <span>打开工作台</span>
                     <ChevronRight className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+
+                {/* 附件悬浮浮层：绝对定位完全脱离文档流，卡片高度与网格对齐不受影响。
+                    pt-2 而非 mt-2 —— 外边距会造成无法跨越的悬停空隙，内边距本身就是可悬停区域 */}
+                <div className="absolute left-0 right-0 top-full z-30 pt-2 invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-[opacity,visibility] duration-150">
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-white rounded-2xl border border-slate-200 shadow-xl shadow-indigo-500/5 p-3"
+                  >
+                    <div className="flex items-center justify-between px-1 pb-2 mb-1 border-b border-slate-100">
+                      <span className="text-[11px] font-bold text-slate-600">
+                        关联附件 ({protoAttachments.length})
+                      </span>
+                      <button
+                        onClick={() => setAttachmentTargetProto(proto)}
+                        className="flex items-center space-x-0.5 text-[11px] font-semibold text-indigo-600 hover:text-indigo-700"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>添加</span>
+                      </button>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                      <AttachmentList
+                        attachments={protoAttachments}
+                        onDelete={(id) => handleDeleteAttachment(proto.id, id)}
+                        compact
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -490,6 +580,15 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* 附件新增弹窗：必须挂在组件层，放进悬浮浮层会随鼠标移开被一起卸载 */}
+      {attachmentTargetProto && (
+        <AttachmentModal
+          protoName={attachmentTargetProto.name}
+          onClose={() => setAttachmentTargetProto(null)}
+          onSubmit={handleAddAttachment}
+        />
       )}
 
       {/* 自定义删除确认弹窗 */}

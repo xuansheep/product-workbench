@@ -96,7 +96,7 @@ docker compose down
 
 ### 关于持久化数据目录
 
-业务数据只有两处：`storage/data.json`（项目、原型版本、批注全部在内）与 `storage/prototypes/`（原型静态文件）。
+业务数据只有三处：`storage/data.json`（项目、原型版本、批注、附件索引全部在内）、`storage/prototypes/`（原型静态文件）与 `storage/attachments/`（原型关联附件文件，按附件 id 分目录存放）。
 `data.json` 每次写入都是「同目录临时文件 + 原子 rename 替换」，不存在写到一半损坏的风险，服务运行中也能安全备份：
 
 ```bash
@@ -161,6 +161,6 @@ product-workbench/
 ├── deploy.sh                   # 自动化检查与部署脚本
 ├── client/                     # 前端应用 (React 18 + Vite + TailwindCSS + Lucide-react)
 ├── server/                     # 后端应用 (Node.js 16.18+ + Express + 本地 JSON 文件存储)
-├── storage/                    # 数据目录：data.json 为全部业务数据，prototypes/ 为原型静态文件
+├── storage/                    # 数据目录：data.json 为全部业务数据，prototypes/ 为原型静态文件，attachments/ 为关联附件
 └── package.json
 ```

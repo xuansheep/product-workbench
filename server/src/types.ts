@@ -68,8 +68,21 @@ export interface Comment {
   updatedAt: string;
 }
 
+export interface Attachment {
+  id: string;
+  prototypeId: string;
+  name: string;                  // 展示名与下载名；用户留空时由服务端回退为 url 或原始文件名
+  type: "url" | "file";
+  url?: string;                  // type=url，已归一化的 http(s) 地址
+  fileName?: string;             // type=file，上传时的原始文件名
+  mimeType?: string;             // type=file，按扩展名推导的可信类型（非客户端声明值）
+  size?: number;                 // type=file，字节数
+  createdAt: string;
+}
+
 export interface WorkbenchData {
   projects: Project[];
   prototypes: Prototype[];
   comments: Comment[];
+  attachments: Attachment[];
 }

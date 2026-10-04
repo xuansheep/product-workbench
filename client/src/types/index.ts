@@ -71,6 +71,24 @@ export interface Comment {
   updatedAt: string;
 }
 
+export interface Attachment {
+  id: string;
+  prototypeId: string;
+  name: string;
+  type: "url" | "file";
+  url?: string;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+  createdAt: string;
+  // 以下两个字段由服务端派生，用于判断点击后是预览还是下载
+  previewable: boolean;
+  rawUrl?: string;
+}
+
+// 与服务端保持一致的单文件上限，仅用于提交前的即时提示，最终以服务端校验为准
+export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+
 export interface UserAccount {
   id: string;
   name: string;

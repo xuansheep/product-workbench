@@ -10,13 +10,23 @@ import {
   MessageSquare,
   Crosshair,
   ChevronDown,
-  Compass
+  Compass,
+  Paperclip,
+  Plus
 } from "lucide-react";
-import { type Prototype, type Comment, type UserAccount, type CommentTargetInfo } from "../types/index.js";
+import {
+  type Prototype,
+  type Comment,
+  type Attachment,
+  type UserAccount,
+  type CommentTargetInfo
+} from "../types/index.js";
 import { api } from "../services/api.js";
 import { CommentOverlay } from "./CommentOverlay.js";
 import { CommentSidebar } from "./CommentSidebar.js";
 import { ErrorBoundary } from "./common/ErrorBoundary.js";
+import { AttachmentList } from "./common/AttachmentList.js";
+import { AttachmentModal } from "./common/AttachmentModal.js";
 import { findBestMatchingElement, isElementVisibleInDOM, getInlinePageIdentifier } from "../utils/domMatcher.js";
 
 type ViewportType = "responsive" | "macbook" | "ipad" | "iphone";
@@ -35,6 +45,9 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
   const [isAddingComment, setIsAddingComment] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [isAttachmentPanelOpen, setIsAttachmentPanelOpen] = useState(false);
+  const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -54,6 +67,7 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const mainContainerRef = useRef<HTMLElement>(null);
+  const attachmentPanelRef = useRef<HTMLDivElement>(null);
   // 记录跨文件跳转时待定位的评论 ID
   const pendingScrollCommentIdRef = useRef<string | null>(null);
 
@@ -80,6 +94,31 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     loadComments();
   }, [proto.id, selectedVersionId]);
 
+  // 附件归属原型而非版本，切换版本不重新加载
+  const loadAttachments = async () => {
+    try {
+      setAttachments(await api.getAttachmentsByPrototype(proto.id));
+    } catch (err) {
+      console.error("Failed to load attachments:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadAttachments();
+  }, [proto.id]);
+
+  // 点击附件面板以外的区域收起
+  useEffect(() => {
+    if (!isAttachmentPanelOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!attachmentPanelRef.current?.contains(e.target as Node)) {
+        setIsAttachmentPanelOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isAttachmentPanelOpen]);
+
   // 全局及 iframe 内部快捷键统一分发
   const handleGlobalKeyDown = useCallback((e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
@@ -93,6 +132,7 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     } else if (e.key === "Escape") {
       setIsAddingComment(false);
       setActiveCommentId(null);
+      setIsAttachmentPanelOpen(false);
     }
   }, []);
 
@@ -565,12 +605,31 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     }
   };
 
+  const handleAddAttachment = async (formData: FormData) => {
+    const created = await api.addAttachment(proto.id, formData);
+    setAttachments((prev) => [created, ...prev]);
+  };
+
+  const handleDeleteAttachment = async (id: string) => {
+    try {
+      await api.deleteAttachment(id);
+      setAttachments((prev) => prev.filter((a) => a.id !== id));
+    } catch (err: any) {
+      alert(err.message || "附件删除失败");
+    }
+  };
+
   const openCount = comments.filter((c) => c.status === "open").length;
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-900 text-slate-100 font-sans">
       {/* 顶部操作栏 */}
-      <header className="h-14 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 flex items-center justify-between z-20 shrink-0 select-none shadow-md">
+      {/* 面板展开时抬高层级，避免被批注吸附气泡（z-40）压住 */}
+      <header
+        className={`h-14 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 flex items-center justify-between shrink-0 select-none shadow-md ${
+          isAttachmentPanelOpen ? "z-50" : "z-20"
+        }`}
+      >
         {/* 左侧：返回与原型信息 */}
         <div className="flex items-center space-x-3 min-w-0">
           <button
@@ -611,6 +670,47 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
             <div className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/50 text-[11px] text-slate-300">
               <Compass className="w-3 h-3 text-indigo-400 shrink-0" />
               <span className="font-mono truncate max-w-[160px]">{currentSubPath}</span>
+            </div>
+
+            {/* 关联附件：左上信息区最右侧，点击展开 */}
+            <div className="relative shrink-0" ref={attachmentPanelRef}>
+              <button
+                onClick={() => setIsAttachmentPanelOpen((prev) => !prev)}
+                title="关联附件"
+                className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-semibold border transition-all ${
+                  isAttachmentPanelOpen
+                    ? "bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/30"
+                    : "bg-slate-800/90 text-slate-300 border-slate-700/80 hover:text-white hover:border-indigo-500/50"
+                }`}
+              >
+                <Paperclip className="w-3.5 h-3.5" />
+                <span>{attachments.length}</span>
+              </button>
+
+              {isAttachmentPanelOpen && (
+                <div className="absolute right-0 top-full mt-2 z-50 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between px-1 pb-2 mb-1 border-b border-slate-100">
+                    <span className="text-[11px] font-bold text-slate-600">
+                      关联附件 ({attachments.length})
+                    </span>
+                    <button
+                      onClick={() => setIsAttachmentModalOpen(true)}
+                      className="flex items-center space-x-0.5 text-[11px] font-semibold text-indigo-600 hover:text-indigo-700"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>添加</span>
+                    </button>
+                  </div>
+
+                  <div className="max-h-64 overflow-y-auto">
+                    <AttachmentList
+                      attachments={attachments}
+                      onDelete={handleDeleteAttachment}
+                      compact
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -794,6 +894,14 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
           account={account}
         />
       </div>
+
+      {isAttachmentModalOpen && (
+        <AttachmentModal
+          protoName={proto.name}
+          onClose={() => setIsAttachmentModalOpen(false)}
+          onSubmit={handleAddAttachment}
+        />
+      )}
     </div>
   );
 };

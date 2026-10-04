@@ -50,7 +50,7 @@ RUN mkdir -p /app/storage
 # 暴露服务端口
 EXPOSE 9030
 
-# 声明持久化挂载点：业务数据只有 storage/data.json 与 storage/prototypes/ 两处。
+# 声明持久化挂载点：业务数据有 storage/data.json、storage/prototypes/ 与 storage/attachments/ 三处。
 # 生产部署请显式绑定宿主机目录（deploy.sh 与 docker-compose.yml 均为 -v ./storage:/app/storage）。
 # 若启动时漏掉 -v，Docker 会创建一个匿名卷，数据不会丢在容器可写层，但难以定位，
 # 排查时先执行 docker volume ls 确认。

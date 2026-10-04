@@ -1,4 +1,4 @@
-import type { Project, Prototype, Comment, CommentReply, CommentTargetInfo } from "../types/index.js";
+import type { Project, Prototype, Comment, CommentReply, CommentTargetInfo, Attachment } from "../types/index.js";
 
 const BASE_URL = "/api";
 
@@ -96,6 +96,19 @@ export const api = {
     }),
   deleteComment: (commentId: string) =>
     request<{ message: string }>(`/comments/${commentId}`, { method: "DELETE" }),
+
+  // Attachments
+  getAttachmentsByProject: (projectId: string) =>
+    request<Attachment[]>(`/attachments/project/${projectId}`),
+  getAttachmentsByPrototype: (protoId: string) =>
+    request<Attachment[]>(`/attachments/prototype/${protoId}`),
+  addAttachment: (protoId: string, formData: FormData) =>
+    request<Attachment>(`/attachments/prototype/${protoId}`, {
+      method: "POST",
+      body: formData
+    }),
+  deleteAttachment: (id: string) =>
+    request<{ message: string }>(`/attachments/${id}`, { method: "DELETE" }),
 
   // Trash
   getTrash: () => request<Prototype[]>("/trash"),

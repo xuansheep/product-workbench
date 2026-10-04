@@ -17,8 +17,17 @@ fs.mkdirSync(testStorageDir, { recursive: true });
 process.env.WORKBENCH_STORAGE_DIR = testStorageDir;
 process.env.WORKBENCH_DATA_PATH = testDataPath;
 
-const { store } = await import("../dist/db/store.js");
+const { store, normalizeWorkbenchData } = await import("../dist/db/store.js");
 const { detectEntryFile, extractZipSafely } = await import("../dist/utils/archive.js");
+const {
+  sanitizeExt,
+  normalizeMime,
+  isPreviewable,
+  normalizeHttpUrl,
+  decodeOriginalName,
+  resolveAttachmentName,
+  contentDisposition
+} = await import("../dist/utils/attachment.js");
 
 describe("Product Workbench Backend Core Test Suite", { timeout: 10000 }, () => {
   it("1. 项目管理 CRUD 流程应正常运行", () => {
@@ -209,5 +218,124 @@ describe("Product Workbench Backend Core Test Suite", { timeout: 10000 }, () => 
     // 清理
     store.deleteComment(commentId);
     assert.strictEqual(store.getCommentById(commentId), undefined);
+  });
+
+  it("6. 旧数据文件缺 attachments 字段时必须能正常归一化", () => {
+    // 这是升级回归风险最高的一条：线上是「老 data.json 能不能启动」，不是「新装能不能启动」
+    const legacy = normalizeWorkbenchData({
+      projects: [{ id: "p1" }],
+      prototypes: [{ id: "proto1" }],
+      comments: [{ id: "c1" }]
+    });
+    assert.deepStrictEqual(legacy.attachments, []);
+    assert.strictEqual(legacy.projects.length, 1);
+
+    assert.deepStrictEqual(normalizeWorkbenchData(null).attachments, []);
+    assert.deepStrictEqual(normalizeWorkbenchData(undefined).attachments, []);
+    assert.deepStrictEqual(normalizeWorkbenchData({}).comments, []);
+    // 字段类型损坏时按空数组兜底，避免后续 filter/map 直接抛错
+    assert.deepStrictEqual(normalizeWorkbenchData({ attachments: "oops" }).attachments, []);
+  });
+
+  it("7. 附件 CRUD 与原型彻底删除时的级联清理", () => {
+    const protoA = `proto-att-a-${Date.now()}`;
+    const protoB = `proto-att-b-${Date.now()}`;
+    for (const id of [protoA, protoB]) {
+      store.savePrototype({
+        id,
+        projectId: `proj-${id}`,
+        name: `附件原型 ${id}`,
+        description: "",
+        currentVersionId: "",
+        versions: [],
+        isDeleted: false,
+        deletedAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    const urlAtt = store.saveAttachment({
+      id: `att-url-${Date.now()}`,
+      prototypeId: protoA,
+      name: "需求文档",
+      type: "url",
+      url: "https://example.com/spec",
+      createdAt: new Date().toISOString()
+    });
+    const fileAtt = store.saveAttachment({
+      id: `att-file-${Date.now()}`,
+      prototypeId: protoA,
+      name: "标注图.png",
+      type: "file",
+      fileName: "标注图.png",
+      mimeType: "image/png",
+      size: 1024,
+      createdAt: new Date(Date.now() + 1).toISOString()
+    });
+    const otherAtt = store.saveAttachment({
+      id: `att-other-${Date.now()}`,
+      prototypeId: protoB,
+      name: "参考链接",
+      type: "url",
+      url: "https://example.com/ref",
+      createdAt: new Date().toISOString()
+    });
+
+    assert.strictEqual(store.getAttachmentById(urlAtt.id)?.name, "需求文档");
+    // 列表按创建时间倒序，新增的排在前面
+    assert.deepStrictEqual(
+      store.getAttachmentsByPrototype(protoA).map((a) => a.id),
+      [fileAtt.id, urlAtt.id]
+    );
+
+    // 彻底删除 protoA 只应清理它自己的附件
+    store.permanentDeletePrototype(protoA);
+    assert.deepStrictEqual(store.getAttachmentsByPrototype(protoA), []);
+    assert.strictEqual(store.getAttachmentById(otherAtt.id)?.id, otherAtt.id);
+
+    assert.strictEqual(store.deleteAttachment(otherAtt.id), true);
+    assert.strictEqual(store.deleteAttachment(otherAtt.id), false);
+    assert.strictEqual(store.getAttachmentById(otherAtt.id), undefined);
+  });
+
+  it("8. 附件工具函数：类型归一化、危险协议拦截与中文文件名响应头", () => {
+    // 客户端声明的 MIME 不可信，一律由扩展名推导
+    assert.strictEqual(normalizeMime("a.PNG"), "image/png");
+    assert.strictEqual(normalizeMime("a.pdf"), "application/pdf");
+    assert.strictEqual(normalizeMime("a.svg"), "application/octet-stream");
+    assert.strictEqual(normalizeMime("a.html"), "application/octet-stream");
+    assert.strictEqual(normalizeMime("noext"), "application/octet-stream");
+    assert.strictEqual(sanitizeExt("a.tar.gz"), ".gz");
+    assert.strictEqual(sanitizeExt("a.verylongextension"), ".bin");
+
+    // SVG 与 HTML 可在同源下执行脚本，必须走下载而非内联预览
+    assert.strictEqual(isPreviewable("image/png"), true);
+    assert.strictEqual(isPreviewable("application/pdf"), true);
+    assert.strictEqual(isPreviewable("image/svg+xml"), false);
+    assert.strictEqual(isPreviewable("text/html"), false);
+
+    assert.strictEqual(normalizeHttpUrl("https://example.com"), "https://example.com/");
+    assert.strictEqual(normalizeHttpUrl("javascript:alert(1)"), null);
+    assert.strictEqual(normalizeHttpUrl("data:text/html,<script>"), null);
+    assert.strictEqual(normalizeHttpUrl("file:///etc/passwd"), null);
+    assert.strictEqual(normalizeHttpUrl("不是链接"), null);
+
+    // 名称留空时回退到 url 或原始文件名
+    assert.strictEqual(resolveAttachmentName("  ", "https://example.com/"), "https://example.com/");
+    assert.strictEqual(resolveAttachmentName(" 标注图 ", "a.png"), "标注图");
+    assert.strictEqual(resolveAttachmentName("", "a.png"), "a.png");
+    assert.strictEqual(resolveAttachmentName("x".repeat(300), "a.png").length, 200);
+
+    // multer 按 latin1 解码 originalname，中文名需要能还原
+    const mojibake = Buffer.from("标注图.png", "utf-8").toString("latin1");
+    assert.strictEqual(decodeOriginalName(mojibake), "标注图.png");
+    assert.strictEqual(decodeOriginalName("report.pdf"), "report.pdf");
+
+    const header = contentDisposition("attachment", "需求文档.pdf");
+    assert.ok(header.startsWith("attachment; filename="));
+    assert.ok(header.includes(`filename*=UTF-8''${encodeURIComponent("需求文档.pdf")}`));
+    // 头部注入防护
+    assert.ok(!contentDisposition("attachment", "a\r\nX-Evil: 1").includes("\r"));
   });
 });

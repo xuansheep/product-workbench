@@ -2,6 +2,7 @@ import { Router } from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { store, STORAGE_DIR } from "../db/store.js";
+import { removeAttachmentFiles } from "../utils/attachment.js";
 
 const router = Router();
 
@@ -47,6 +48,13 @@ router.delete("/:id/permanent", (req, res) => {
       fs.rmSync(protoDiskDir, { recursive: true, force: true });
     } catch (err) {
       console.error("Failed to delete static directory:", protoDiskDir, err);
+    }
+  }
+
+  // 附件清单必须在删除记录之前取出，删除后就再也反查不到了
+  for (const attachment of store.getAttachmentsByPrototype(proto.id)) {
+    if (attachment.type === "file") {
+      removeAttachmentFiles(attachment.id);
     }
   }
 

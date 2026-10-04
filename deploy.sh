@@ -22,7 +22,7 @@ echo "[1/4] 正在构建 Docker 镜像: ${IMAGE_NAME} ..."
 docker build -t "${IMAGE_NAME}" .
 
 # 2. 准备宿主机持久化目录
-#    业务数据只有 storage/data.json 与 storage/prototypes/ 两处，直接落在宿主机上，
+#    业务数据有 storage/data.json、storage/prototypes/ 与 storage/attachments/ 三处，直接落在宿主机上，
 #    备份与迁移都只需操作这个目录。
 echo "[2/4] 正在准备宿主机持久化目录: ${HOST_STORAGE_DIR} ..."
 mkdir -p "${HOST_STORAGE_DIR}"

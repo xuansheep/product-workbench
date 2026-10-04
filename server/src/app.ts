@@ -6,6 +6,7 @@ import { STORAGE_DIR } from "./db/store.js";
 import projectsRouter from "./routes/projects.js";
 import prototypesRouter from "./routes/prototypes.js";
 import commentsRouter from "./routes/comments.js";
+import attachmentsRouter from "./routes/attachments.js";
 import trashRouter from "./routes/trash.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,6 +36,7 @@ export function createApp() {
   app.use("/api/projects", projectsRouter);
   app.use("/api/prototypes", prototypesRouter);
   app.use("/api/comments", commentsRouter);
+  app.use("/api/attachments", attachmentsRouter);
   app.use("/api/trash", trashRouter);
 
   // 健康检查
