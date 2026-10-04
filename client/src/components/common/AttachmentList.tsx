@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { createPortal } from "react-dom";
 import { Link2, FileText, Download, Trash2 } from "lucide-react";
 import { type Attachment } from "../../types/index.js";
 import { ConfirmModal } from "./ConfirmModal.js";
@@ -84,21 +83,19 @@ export const AttachmentList: React.FC<AttachmentListProps> = ({ attachments, onD
         })}
       </ul>
 
-      {/* 用 Portal 挂到 body：卡片悬浮浮层在鼠标移开时会因 visibility:hidden 一并隐藏子节点，
-          浮层内的弹窗会被继承的 visibility 拖成不可见且不可交互 */}
-      {deletingId &&
-        createPortal(
-          <ConfirmModal
-            isOpen
-            title="删除附件"
-            description="确定要删除此附件吗？文件将从服务器一并清除，该操作不可撤销。"
-            confirmText="彻底删除"
-            type="danger"
-            onConfirm={handleConfirmDelete}
-            onCancel={() => setDeletingId(null)}
-          />,
-          document.body
-        )}
+      {/* ConfirmModal 自带 ModalPortal 挂到 body，因此不会被卡片悬浮浮层的
+          visibility:hidden 一并隐藏 —— 隔层浮层里也不会变成不可见或不可交互 */}
+      {deletingId && (
+        <ConfirmModal
+          isOpen
+          title="删除附件"
+          description="确定要删除此附件吗？文件将从服务器一并清除，该操作不可撤销。"
+          confirmText="彻底删除"
+          type="danger"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeletingId(null)}
+        />
+      )}
     </>
   );
 };

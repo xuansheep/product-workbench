@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Plus, Search, FolderKanban, Edit2, Trash2, ArrowRight, Layers } from "lucide-react";
 import { type Project } from "../types/index.js";
 import { ConfirmModal } from "./common/ConfirmModal.js";
+import { ModalPortal } from "./common/ModalPortal.js";
 
 interface ProjectListProps {
   projects: Project[];
@@ -190,7 +191,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
 
       {/* 创建 / 编辑弹窗 */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+        <ModalPortal>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
               <h3 className="font-bold text-slate-800 text-base">
@@ -252,7 +253,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* 自定义删除确认弹窗 */}

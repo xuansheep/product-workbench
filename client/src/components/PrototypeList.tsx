@@ -3,6 +3,7 @@ import {
   Upload,
   Plus,
   FileCode,
+  FolderOpen,
   Archive,
   History,
   Trash2,
@@ -15,7 +16,14 @@ import {
 } from "lucide-react";
 import { type Project, type Prototype, type Attachment } from "../types/index.js";
 import { api } from "../services/api.js";
+import {
+  isJunkRelativePath,
+  readFileSystemEntry,
+  validateFolder,
+  type DroppedFile
+} from "../utils/folderUpload.js";
 import { ConfirmModal } from "./common/ConfirmModal.js";
+import { ModalPortal } from "./common/ModalPortal.js";
 import { AttachmentList } from "./common/AttachmentList.js";
 import { AttachmentModal } from "./common/AttachmentModal.js";
 
@@ -29,6 +37,11 @@ interface PrototypeListProps {
   onUpdatePrototype: (id: string, name: string, description: string) => Promise<void>;
   onDeletePrototype: (protoId: string) => Promise<void>;
 }
+
+// 单文件与整个文件夹是两种形态，用判别联合表达，避免出现「既没有文件也没有文件夹」的中间态
+type UploadSelection =
+  | { kind: "file"; file: File }
+  | { kind: "folder"; rootName: string | null; files: DroppedFile[]; totalSize: number };
 
 export const PrototypeList: React.FC<PrototypeListProps> = ({
   project,
@@ -56,11 +69,12 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [changelog, setChangelog] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selection, setSelection] = useState<UploadSelection | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // 附件加载失败不该拖垮卡片列表，记录日志后按空列表渲染即可
@@ -103,7 +117,7 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
     setName(targetProto ? targetProto.name : "");
     setDesc(targetProto ? targetProto.description : "");
     setChangelog(targetProto ? `迭代更新 v${targetProto.versions.length + 1}.0` : "初始版本上传");
-    setSelectedFile(null);
+    setSelection(null);
     setIsUploadModalOpen(true);
   };
 
@@ -128,31 +142,90 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
     }
   };
 
-  const handleFileDrop = (e: React.DragEvent) => {
+  // 单文件只放行与后端白名单一致的三种格式，避免白跑一趟上传
+  const pickSingleFile = (file: File | null) => {
+    if (!file) return;
+    const dot = file.name.lastIndexOf(".");
+    const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
+    if (![".zip", ".html", ".htm"].includes(ext)) {
+      alert("单文件仅支持 .zip / .html / .htm，整个文件夹请用「选择文件夹」");
+      return;
+    }
+    setSelection({ kind: "file", file });
+  };
+
+  const pickFolder = (dropped: DroppedFile[], rootName: string | null) => {
+    const files = dropped.filter((item) => !isJunkRelativePath(item.relativePath));
+    const validation = validateFolder(files);
+    if (!validation.ok) {
+      alert(validation.message);
+      return;
+    }
+    setSelection({ kind: "folder", rootName, files, totalSize: validation.totalSize });
+  };
+
+  // input[webkitdirectory] 选中的文件自带 webkitRelativePath；不支持该特性的浏览器退化为文件名
+  const toDroppedFiles = (list: FileList | null): DroppedFile[] =>
+    Array.from(list ?? []).map((file) => ({
+      file,
+      relativePath: file.webkitRelativePath || file.name
+    }));
+
+  const handleFileDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setSelectedFile(e.dataTransfer.files[0]);
+
+    // dataTransfer 一旦让出事件循环就进入 protected mode、内容被清空，
+    // items 与 files 都必须在 await 之前同步快照，否则会偶发拿不到文件
+    const rawFiles = Array.from(e.dataTransfer.files ?? []);
+    const entries = (e.dataTransfer.items ? Array.from(e.dataTransfer.items) : [])
+      .filter((item) => item.kind === "file")
+      .map((item) => item.webkitGetAsEntry?.() ?? null)
+      .filter((entry): entry is FileSystemEntry => entry !== null);
+
+    // 拖入单个文件夹：整棵目录树走文件夹模式
+    if (entries.length === 1 && entries[0].isDirectory) {
+      pickFolder(await readFileSystemEntry(entries[0], entries[0].name), entries[0].name);
+      return;
     }
+
+    // 拖入多个条目（散文件或文件夹混合）同样走文件夹模式，此时没有可剥离的根目录
+    if (entries.length > 1) {
+      const nested = await Promise.all(entries.map((entry) => readFileSystemEntry(entry, entry.name)));
+      pickFolder(nested.flat(), null);
+      return;
+    }
+
+    // 单个文件维持原有单文件逻辑（同时兼容 webkitGetAsEntry 不可用的浏览器）
+    if (rawFiles[0]) pickSingleFile(rawFiles[0]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFile) {
-      alert("请选择要上传的原型文件 (.zip 或 .html)");
+    if (!selection) {
+      alert("请选择要上传的原型文件或文件夹");
       return;
     }
     setUploading(true);
     try {
       const formData = new FormData();
-      formData.append("file", selectedFile);
       formData.append("changelog", changelog.trim());
+
+      if (selection.kind === "file") {
+        formData.append("file", selection.file);
+      } else {
+        // 第三个参数显式指定相对路径，后端据此还原目录结构
+        for (const item of selection.files) {
+          formData.append("files", item.file, item.relativePath);
+        }
+      }
 
       if (uploadTargetProto) {
         await onUploadNewVersion(uploadTargetProto.id, formData);
       } else {
         formData.append("projectId", project.id);
-        formData.append("name", name.trim() || selectedFile.name.replace(/\.[^/.]+$/, ""));
+        // 留空则由后端按文件名 / 文件夹名推导
+        if (name.trim()) formData.append("name", name.trim());
         formData.append("description", desc.trim());
         await onUploadPrototype(formData);
       }
@@ -360,7 +433,7 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
 
       {/* 上传模态框 */}
       {isUploadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+        <ModalPortal>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
@@ -374,7 +447,7 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                   <p className="text-xs text-slate-400">
                     {uploadTargetProto
                       ? `上传后将自动递增为 v${uploadTargetProto.versions.length + 1}.0`
-                      : "支持 .zip 静态网站压缩包或单 .html 页面"}
+                      : "支持 .zip 压缩包、单 .html 页面，或整个文件夹"}
                   </p>
                 </div>
               </div>
@@ -398,33 +471,56 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                 className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
                   isDragging
                     ? "border-indigo-500 bg-indigo-50/50"
-                    : selectedFile
+                    : selection
                     ? "border-emerald-500 bg-emerald-50/30"
                     : "border-slate-200 hover:border-indigo-400 hover:bg-slate-50"
                 }`}
               >
+                {/* accept 与 webkitdirectory 不能共存于同一个 input，故拆成两个 */}
+                {/* onClick 必须拦截：input.click() 派发的 click 会冒泡到外层拖拽区，
+                    否则每次选文件夹都会再弹一次单文件选择器把文件夹选择器顶掉 */}
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept=".zip,.html,.htm"
+                  onClick={(e) => e.stopPropagation()}
                   onChange={(e) => {
-                    if (e.target.files && e.target.files.length > 0) {
-                      setSelectedFile(e.target.files[0]);
-                    }
+                    pickSingleFile(e.target.files?.[0] ?? null);
+                    e.target.value = "";
+                  }}
+                  className="hidden"
+                />
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  // webkitdirectory 不在 React 的 InputHTMLAttributes 类型里，沿用项目既有的 as any 先例
+                  {...({ webkitdirectory: "", directory: "" } as any)}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    const dropped = toDroppedFiles(e.target.files);
+                    pickFolder(dropped, dropped.length > 0 ? dropped[0].relativePath.split("/")[0] : null);
+                    e.target.value = "";
                   }}
                   className="hidden"
                 />
 
-                {selectedFile ? (
+                {selection ? (
                   <div className="space-y-1.5">
                     <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-                      <FileCode className="w-5 h-5" />
+                      {selection.kind === "file" ? (
+                        <FileCode className="w-5 h-5" />
+                      ) : (
+                        <FolderOpen className="w-5 h-5" />
+                      )}
                     </div>
                     <p className="text-xs font-semibold text-emerald-800 truncate max-w-xs mx-auto">
-                      {selectedFile.name}
+                      {selection.kind === "file" ? selection.file.name : selection.rootName || "已选文件夹"}
                     </p>
                     <p className="text-[10px] text-emerald-600">
-                      {(selectedFile.size / 1024 / 1024).toFixed(2)} MB · 点击可更换
+                      {selection.kind === "file"
+                        ? `${(selection.file.size / 1024 / 1024).toFixed(2)} MB`
+                        : `${selection.files.length} 个文件 · ${(selection.totalSize / 1024 / 1024).toFixed(2)} MB`}
+                      {" · 点击可更换"}
                     </p>
                   </div>
                 ) : (
@@ -432,10 +528,36 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                     <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
                       <Archive className="w-5 h-5" />
                     </div>
-                    <p className="text-xs font-semibold text-slate-700">点击选择或拖拽文件到这里</p>
-                    <p className="text-[10px] text-slate-400">支持 Axure/墨刀导出的 .zip 压缩包或单 .html 页面</p>
+                    <p className="text-xs font-semibold text-slate-700">点击选择文件，或拖拽文件/文件夹到这里</p>
+                    <p className="text-[10px] text-slate-400">
+                      支持 Axure/墨刀导出的 .zip 压缩包、单 .html 页面，或直接拖入整个文件夹
+                    </p>
                   </div>
                 )}
+
+                <div className="mt-3 flex items-center justify-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      // 阻止冒泡，否则会触发外层拖拽区的 onClick
+                      e.stopPropagation();
+                      fileInputRef.current?.click();
+                    }}
+                    className="px-3 py-1.5 text-[11px] font-semibold text-indigo-600 bg-white border border-indigo-100 hover:border-indigo-300 rounded-lg transition-colors"
+                  >
+                    选择压缩包
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      folderInputRef.current?.click();
+                    }}
+                    className="px-3 py-1.5 text-[11px] font-semibold text-indigo-600 bg-white border border-indigo-100 hover:border-indigo-300 rounded-lg transition-colors"
+                  >
+                    选择文件夹
+                  </button>
+                </div>
               </div>
 
               {!uploadTargetProto && (
@@ -447,7 +569,7 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="默认使用上传文件名"
+                    placeholder="默认使用文件名或文件夹名"
                     maxLength={50}
                     className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900 bg-white"
                   />
@@ -494,7 +616,7 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={uploading || !selectedFile}
+                  disabled={uploading || !selection}
                   className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition-colors disabled:opacity-50 flex items-center space-x-1.5"
                 >
                   {uploading ? (
@@ -506,12 +628,12 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* 编辑原型信息弹窗 */}
       {editingProto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+        <ModalPortal>
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
@@ -579,7 +701,7 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
               </div>
             </form>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* 附件新增弹窗：必须挂在组件层，放进悬浮浮层会随鼠标移开被一起卸载 */}

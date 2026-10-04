@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
+import { assertInsideBase, isJunkPath } from "./pathSafe.js";
 
 export interface ExtractedPrototypeResult {
   entryFile: string;
@@ -19,11 +20,10 @@ export function extractZipSafely(zipBuffer: Buffer, targetDir: string): Extracte
   const normalizedTargetDir = path.resolve(targetDir);
 
   for (const entry of zipEntries) {
-    const resolvedPath = path.resolve(normalizedTargetDir, entry.entryName);
+    // macOS 压缩会带上 __MACOSX/ 与 .DS_Store，没必要跟着原型一起落盘
+    if (isJunkPath(entry.entryName)) continue;
     // 防御 Zip Slip
-    if (!resolvedPath.startsWith(normalizedTargetDir)) {
-      throw new Error(`Malicious zip entry path detected: ${entry.entryName}`);
-    }
+    const resolvedPath = assertInsideBase(normalizedTargetDir, entry.entryName);
     if (entry.isDirectory) {
       fs.mkdirSync(resolvedPath, { recursive: true });
     } else {

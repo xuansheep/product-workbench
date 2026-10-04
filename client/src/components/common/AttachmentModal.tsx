@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { Link2, Paperclip, Upload, X } from "lucide-react";
 import { MAX_ATTACHMENT_SIZE } from "../../types/index.js";
+import { ModalPortal } from "./ModalPortal.js";
 
 interface AttachmentModalProps {
   protoName: string;
@@ -56,7 +57,7 @@ export const AttachmentModal: React.FC<AttachmentModalProps> = ({ protoName, onC
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+    <ModalPortal>
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
@@ -187,6 +188,6 @@ export const AttachmentModal: React.FC<AttachmentModalProps> = ({ protoName, onC
           </div>
         </form>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

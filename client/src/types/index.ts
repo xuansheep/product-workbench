@@ -89,6 +89,11 @@ export interface Attachment {
 // 与服务端保持一致的单文件上限，仅用于提交前的即时提示，最终以服务端校验为准
 export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 
+// 同理的原型上传限制，服务端可通过环境变量调整，不一致时以服务端返回的中文提示为准
+export const MAX_PROTOTYPE_FILE_SIZE = 20 * 1024 * 1024;
+export const MAX_PROTOTYPE_FOLDER_FILES = 1000;
+export const MAX_PROTOTYPE_TOTAL_SIZE = 200 * 1024 * 1024;
+
 export interface UserAccount {
   id: string;
   name: string;

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { AlertTriangle, Trash2, X, AlertCircle } from "lucide-react";
+import { ModalPortal } from "./ModalPortal.js";
 
 export interface ConfirmModalProps {
   isOpen: boolean;
@@ -48,7 +49,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   const isDanger = type === "danger";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+    <ModalPortal className="animate-in fade-in duration-150">
       <div
         className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-sm overflow-hidden p-6 space-y-4 animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
@@ -90,6 +91,6 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

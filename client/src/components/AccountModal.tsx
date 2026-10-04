@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { X, Check, User, ChevronDown, ChevronUp } from "lucide-react";
 import { type UserAccount, PRESET_AVATARS } from "../types/index.js";
+import { ModalPortal } from "./common/ModalPortal.js";
 
 interface AccountModalProps {
   isOpen: boolean;
@@ -42,7 +43,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+    <ModalPortal>
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* 顶部标题 */}
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
@@ -167,6 +168,6 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

@@ -4,6 +4,67 @@ import fs from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
 
+// 不用 zlib.crc32：那是 Node 20.15+ 才有的 API，本包 engines 声明 >=16.18
+function crc32(buf) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i += 1) {
+    crc ^= buf[i];
+    for (let k = 0; k < 8; k += 1) {
+      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * 手工拼一个 stored（不压缩）zip。
+ * 存在的唯一理由：adm-zip 的写入路径会归一化条目名，只有自己拼字节才能造出
+ * 含 '../' 或前导 '/' 的恶意条目，用于验证解包时的真实防护。
+ */
+function rawZip(entries) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+
+  for (const [name, content] of entries) {
+    const nameBuf = Buffer.from(name, "utf-8");
+    const data = Buffer.from(content, "utf-8");
+    const crc = crc32(data);
+
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4); // version needed
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18); // compressed size（stored 故等于原长）
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    locals.push(local, nameBuf, data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4); // version made by
+    central.writeUInt16LE(20, 6); // version needed
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBuf);
+
+    offset += local.length + nameBuf.length + data.length;
+  }
+
+  const directory = Buffer.concat(centrals);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(directory.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+
+  return Buffer.concat([...locals, directory, eocd]);
+}
+
 // 严格沙箱隔离：单测使用独立的数据文件与存储目录
 const tempDir = path.resolve(".tmp/test_workbench_runtime");
 const testStorageDir = path.join(tempDir, "storage");
@@ -337,5 +398,37 @@ describe("Product Workbench Backend Core Test Suite", { timeout: 10000 }, () => 
     assert.ok(header.includes(`filename*=UTF-8''${encodeURIComponent("需求文档.pdf")}`));
     // 头部注入防护
     assert.ok(!contentDisposition("attachment", "a\r\nX-Evil: 1").includes("\r"));
+  });
+
+  it("9. Zip 里的系统垃圾条目必须被过滤", () => {
+    const extractTarget = path.join(tempDir, "extracted_junk");
+    const zip = new AdmZip();
+    zip.addFile("index.html", Buffer.from("<h1>ok</h1>", "utf-8"));
+    zip.addFile("__MACOSX/._index.html", Buffer.from("junk", "utf-8"));
+    zip.addFile(".DS_Store", Buffer.from("junk", "utf-8"));
+
+    const result = extractZipSafely(zip.toBuffer(), extractTarget);
+    assert.strictEqual(result.entryFile, "index.html");
+    assert.ok(fs.existsSync(path.join(extractTarget, "index.html")));
+    assert.ok(!fs.existsSync(path.join(extractTarget, "__MACOSX")));
+    assert.ok(!fs.existsSync(path.join(extractTarget, ".DS_Store")));
+  });
+
+  it("10. Zip 穿越条目必须被拒绝（含 v1evil 前缀歧义）", () => {
+    // 攻击样本必须手工拼字节：adm-zip 在 addFile/writeZip 阶段就会自行归一化条目名
+    // （'../v1evil/x' 会被写成 'v1evil/x'），用它构造的 zip 根本不含穿越条目，
+    // 但 adm-zip 在**读取**外部 zip 时原样保留 entryName —— 那才是真实的攻击路径。
+    const escapeRoot = path.join(tempDir, "escape_case");
+    const escapeTarget = path.join(escapeRoot, "v1");
+    fs.mkdirSync(escapeTarget, { recursive: true });
+
+    // 目标目录以 v1 结尾时，../v1evil/x 会被「纯字符串前缀」判断误放行
+    assert.throws(() =>
+      extractZipSafely(rawZip([["../v1evil/evil.html", "<h1>evil</h1>"]]), escapeTarget)
+    );
+    assert.ok(!fs.existsSync(path.join(escapeRoot, "v1evil")));
+
+    assert.throws(() => extractZipSafely(rawZip([["/tmp/abs.html", "<h1>abs</h1>"]]), escapeTarget));
+    assert.ok(!fs.existsSync("/tmp/abs.html"));
   });
 });

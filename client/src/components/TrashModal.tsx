@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { X, Trash2, RotateCcw, Calendar } from "lucide-react";
 import { type Prototype } from "../types/index.js";
 import { ConfirmModal } from "./common/ConfirmModal.js";
+import { ModalPortal } from "./common/ModalPortal.js";
 
 interface TrashModalProps {
   isOpen: boolean;
@@ -46,7 +47,7 @@ export const TrashModal: React.FC<TrashModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+      <ModalPortal className="animate-in fade-in duration-150">
         <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/80 w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150">
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center space-x-2.5">
@@ -125,7 +126,7 @@ export const TrashModal: React.FC<TrashModalProps> = ({
             )}
           </div>
         </div>
-      </div>
+      </ModalPortal>
 
       {/* 彻底删除确认弹窗 */}
       <ConfirmModal
