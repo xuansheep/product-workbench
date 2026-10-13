@@ -43,11 +43,16 @@ export interface CommentReply {
 }
 
 export interface CommentTargetInfo {
-  selector?: string;             // 目标元素 CSS 选择器
+  anchorKind?: "element" | "container"; // 缺省时按 selector 是否存在推断
+  selector?: string;             // element 锚点：相对 viewContainerSelector 作用域的选择器
+  viewContainerSelector?: string;// 视图容器选择器，锚点解析的硬边界
+  containerOffsetXPercent?: number; // container 锚点：相对容器 padding box 的 X% 偏移 (0-100)
+  containerOffsetYPercent?: number; // container 锚点：相对容器 padding box 的 Y% 偏移 (0-100)
   tagName?: string;              // BUTTON, DIV, INPUT 等
   innerTextSnippet?: string;     // 目标元素文本前缀，如 "立即接单"
   elementOffsetXPercent?: number;// 相对目标元素内部的 X% 偏移 (0-100)
   elementOffsetYPercent?: number;// 相对目标元素内部的 Y% 偏移 (0-100)
+  inlinePageId?: string;         // 所属内联页面/视图容器标识（如 page-overview）
 }
 
 export interface Comment {
@@ -55,10 +60,10 @@ export interface Comment {
   prototypeId: string;
   versionId: string;
   pagePath: string;              // 规范化相对子路径与 hash，如 "index.html" 或 "order.html#/pay"
-  xPercent: number;              // 视口相对备用坐标 (0-100)
-  yPercent: number;              // 视口相对备用坐标 (0-100)
-  docX?: number;                 // 文档绝对坐标 X (像素)
-  docY?: number;                 // 文档绝对坐标 Y (像素)
+  xPercent?: number;             // 已废弃：不再参与渲染定位，仅历史数据保留
+  yPercent?: number;             // 已废弃：不再参与渲染定位，仅历史数据保留
+  docX?: number;                 // 已废弃：不再参与渲染定位，仅历史数据保留
+  docY?: number;                 // 已废弃：不再参与渲染定位，仅历史数据保留
   target?: CommentTargetInfo;    // 锚定目标 DOM 元素信息
   content: string;
   author: CommentAuthor;

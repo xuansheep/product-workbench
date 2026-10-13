@@ -4,11 +4,8 @@ import {
   MessageSquare,
   CheckCircle2,
   Circle,
-  CornerDownRight,
   Send,
   Trash2,
-  Filter,
-  Layers,
   Pin,
   Compass,
   ArrowUpRight,
@@ -27,7 +24,6 @@ interface CommentSidebarProps {
   onToggleStatus: (commentId: string, currentStatus: "open" | "resolved") => Promise<void>;
   onAddReply: (commentId: string, content: string) => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
-  onNavigateToPage?: (pagePath: string) => void;
   currentVersionLabel: string;
   account: UserAccount;
 }
@@ -42,7 +38,6 @@ export const CommentSidebar: React.FC<CommentSidebarProps> = ({
   onToggleStatus,
   onAddReply,
   onDeleteComment,
-  onNavigateToPage,
   currentVersionLabel,
   account
 }) => {

@@ -12,7 +12,8 @@ import {
   ChevronDown,
   Compass,
   Paperclip,
-  Plus
+  Plus,
+  FileText
 } from "lucide-react";
 import {
   type Prototype,
@@ -22,12 +23,11 @@ import {
   type CommentTargetInfo
 } from "../types/index.js";
 import { api } from "../services/api.js";
-import { CommentOverlay } from "./CommentOverlay.js";
 import { CommentSidebar } from "./CommentSidebar.js";
-import { ErrorBoundary } from "./common/ErrorBoundary.js";
 import { AttachmentList } from "./common/AttachmentList.js";
 import { AttachmentModal } from "./common/AttachmentModal.js";
-import { findBestMatchingElement, isElementVisibleInDOM, getInlinePageIdentifier } from "../utils/domMatcher.js";
+import { resolveAnchor } from "../utils/commentAnchor.js";
+import { CommentPinLayer, type DraftPayload } from "../commentLayer/CommentPinLayer.js";
 
 type ViewportType = "responsive" | "macbook" | "ipad" | "iphone";
 
@@ -47,12 +47,12 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
   const [comments, setComments] = useState<Comment[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isAttachmentPanelOpen, setIsAttachmentPanelOpen] = useState(false);
+  const [isVersionNotePanelOpen, setIsVersionNotePanelOpen] = useState(false);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [currentSubPath, setCurrentSubPath] = useState<string>("index.html");
-  const [scrollVersion, setScrollVersion] = useState(0);
 
   const currentVersion =
     proto.versions.find((v) => v.id === selectedVersionId) || proto.versions[0];
@@ -68,8 +68,32 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const mainContainerRef = useRef<HTMLElement>(null);
   const attachmentPanelRef = useRef<HTMLDivElement>(null);
+  const versionNotePanelRef = useRef<HTMLDivElement>(null);
   // 记录跨文件跳转时待定位的评论 ID
   const pendingScrollCommentIdRef = useRef<string | null>(null);
+  // iframe 内批注浮窗层的唯一实例
+  const layerRef = useRef<CommentPinLayer | null>(null);
+  // 浮窗层只创建一次，通过它读取最新的 props/state，避免闭包读到旧值
+  const latestRef = useRef({
+    proto,
+    account,
+    selectedVersionId,
+    currentSubPath,
+    comments,
+    activeCommentId,
+    isSidebarOpen,
+    isAddingComment
+  });
+  latestRef.current = {
+    proto,
+    account,
+    selectedVersionId,
+    currentSubPath,
+    comments,
+    activeCommentId,
+    isSidebarOpen,
+    isAddingComment
+  };
 
   // 版本切换时重置 iframe URL
   useEffect(() => {
@@ -119,20 +143,43 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isAttachmentPanelOpen]);
 
+  // 点击版本更新说明面板以外的区域收起
+  useEffect(() => {
+    if (!isVersionNotePanelOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!versionNotePanelRef.current?.contains(e.target as Node)) {
+        setIsVersionNotePanelOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isVersionNotePanelOpen]);
+
   // 全局及 iframe 内部快捷键统一分发
   const handleGlobalKeyDown = useCallback((e: KeyboardEvent) => {
-    const target = e.target as HTMLElement | null;
-    const tagName = target?.tagName?.toUpperCase();
-    if (tagName === "INPUT" || tagName === "TEXTAREA" || (target as any)?.isContentEditable) {
-      return;
-    }
+    // 事件从 Shadow DOM 冒出后 e.target 会被重定向为宿主节点，必须走 composedPath 判断
+    const path = e.composedPath?.() ?? [];
+    const fromEditing = path.some((node) => {
+      const el = node as HTMLElement | null;
+      const tag = el?.tagName?.toUpperCase();
+      return tag === "INPUT" || tag === "TEXTAREA" || Boolean(el?.isContentEditable);
+    });
+    const fromLayer = path.some((node) => {
+      const tag = (node as Element)?.tagName;
+      return typeof tag === "string" && tag.startsWith("WB-");
+    });
+    if (fromEditing || fromLayer) return;
+
     if (e.key === "c" || e.key === "C") {
       e.preventDefault();
       setIsAddingComment((prev) => !prev);
     } else if (e.key === "Escape") {
+      // 先取消未提交的草稿，再退出批注模式
+      if (layerRef.current?.cancelDraft()) return;
       setIsAddingComment(false);
       setActiveCommentId(null);
       setIsAttachmentPanelOpen(false);
+      setIsVersionNotePanelOpen(false);
     }
   }, []);
 
@@ -175,102 +222,6 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     }
   }, [handleGlobalKeyDown, handlePrototypeContextMenu]);
 
-  // 临时高亮目标 DOM 元素，呈现蓝紫色呼吸发光聚光灯效果
-
-  // 执行绝对平滑滚动居中并对焦到对应评论位置
-  const performScrollToComment = useCallback((targetComment: Comment) => {
-    try {
-      const iframeDoc = iframeRef.current?.contentDocument;
-      const iframeWin = iframeRef.current?.contentWindow;
-      if (!iframeDoc || !iframeWin) return;
-
-      let targetElement: HTMLElement | null = null;
-      if (targetComment.target) {
-        targetElement = findBestMatchingElement(
-          iframeDoc,
-          targetComment.target,
-          targetComment.docX,
-          targetComment.docY
-        );
-      }
-
-      const scrollX = iframeWin?.scrollX ?? iframeDoc?.documentElement?.scrollLeft ?? iframeDoc?.body?.scrollLeft ?? 0;
-      const scrollY = iframeWin?.scrollY ?? iframeDoc?.documentElement?.scrollTop ?? iframeDoc?.body?.scrollTop ?? 0;
-
-      if (targetElement) {
-        // 1. 获取目标元素在文档中的绝对坐标
-        const r = targetElement.getBoundingClientRect();
-        const elDocX = r.left + scrollX + r.width / 2;
-        const elDocY = r.top + scrollY + r.height / 2;
-
-        // 2. 无论当前是否在视口中，强制让 iframeWin 平滑居中滚动！
-        const targetTop = Math.max(0, elDocY - iframeWin.innerHeight / 2);
-        const targetLeft = Math.max(0, elDocX - iframeWin.innerWidth / 2);
-
-        iframeWin.scrollTo({
-          top: targetTop,
-          left: targetLeft,
-          behavior: "smooth"
-        });
-
-        // 3. 同时触发原生 scrollIntoView 应对内部局部滚动容器（如 .layout-main）
-        try {
-          targetElement.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-            inline: "center"
-          });
-        } catch {
-          targetElement.scrollIntoView();
-        }
-
-        // 4. 外层 main 视口也平滑同步居中（若外层有滚动条）
-        if (mainContainerRef.current) {
-          const mainEl = mainContainerRef.current;
-          if (mainEl.scrollWidth > mainEl.clientWidth || mainEl.scrollHeight > mainEl.clientHeight) {
-            mainEl.scrollTo({
-              top: Math.max(0, (mainEl.scrollHeight - mainEl.clientHeight) / 2),
-              left: Math.max(0, (mainEl.scrollWidth - mainEl.clientWidth) / 2),
-              behavior: "smooth"
-            });
-          }
-        }
-
-      } else if (typeof targetComment.docY === "number" || typeof targetComment.yPercent === "number") {
-        // 坐标兜底方案
-        const scrollHeight = iframeDoc?.documentElement?.scrollHeight ?? iframeDoc?.body?.scrollHeight ?? 0;
-        const scrollWidth = iframeDoc?.documentElement?.scrollWidth ?? iframeDoc?.body?.scrollWidth ?? 0;
-
-        const targetDocY =
-          typeof targetComment.docY === "number"
-            ? targetComment.docY
-            : (scrollHeight * (targetComment.yPercent || 0)) / 100;
-        const targetDocX =
-          typeof targetComment.docX === "number"
-            ? targetComment.docX
-            : (scrollWidth * (targetComment.xPercent || 0)) / 100;
-
-        const top = Math.max(0, targetDocY - iframeWin.innerHeight / 2);
-        const left = Math.max(0, targetDocX - iframeWin.innerWidth / 2);
-
-        iframeWin.scrollTo({
-          top,
-          left,
-          behavior: "smooth"
-        });
-      }
-
-      // 滚动期间与完成后多次同步 Pin 坐标
-      const delays = [50, 150, 300, 500, 800, 1200];
-      delays.forEach((delay) => {
-        setTimeout(() => {
-          setScrollVersion((v) => v + 1);
-        }, delay);
-      });
-    } catch (err) {
-      console.warn("performScrollToComment error:", err);
-    }
-  }, []);
 
   // 尝试激活目标元素所在的内联子页面（如针对同一个 HTML 内的 .page、tab 等）
   const switchInlinePageIfNeeded = useCallback((targetComment: Comment): boolean => {
@@ -278,37 +229,22 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     const iframeWin = iframeRef.current?.contentWindow as any;
     if (!iframeDoc || !iframeWin) return false;
 
-    let targetElement: HTMLElement | null = null;
-    if (targetComment.target) {
-      targetElement = findBestMatchingElement(
-        iframeDoc,
-        targetComment.target,
-        targetComment.docX,
-        targetComment.docY
-      );
-    }
+    // 已经能解析出可见锚点，无需切页
+    if (resolveAnchor(iframeDoc, targetComment.target)) return false;
 
-    // 若目标元素已经可见，无需切换内联页面
-    if (targetElement && isElementVisibleInDOM(targetElement, iframeDoc)) {
-      return false;
-    }
-
-    // 寻找目标元素所在的内联页面容器
-    const inlinePageId =
-      targetComment.target?.inlinePageId ||
-      (targetElement ? getInlinePageIdentifier(targetElement, iframeDoc) : undefined);
-
+    const inlinePageId = targetComment.target?.inlinePageId;
     if (!inlinePageId) return false;
 
-    // 1. 若原型定义了全局 go(pageId) 函数（如本原型系统 go('sites')）
+    // 1. 若原型定义了全局 go(pageId)（如 go('sites')）。
+    // 注意 go() 会先清空所有 .page 的 active 再按 id 取元素，id 不存在时抛错会留下全空白页，
+    // 因此必须先确认目标容器存在再调用。
     const cleanKey = inlinePageId.replace(/^page-/, "");
-    if (typeof iframeWin.go === "function") {
+    if (typeof iframeWin.go === "function" && iframeDoc.getElementById(`page-${cleanKey}`)) {
       try {
         iframeWin.go(cleanKey);
-        setScrollVersion((v) => v + 1);
         return true;
       } catch {
-        // continue
+        // 落到后续策略
       }
     }
 
@@ -318,17 +254,22 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     ) as HTMLElement | null;
     if (navBtn) {
       navBtn.click();
-      setScrollVersion((v) => v + 1);
       return true;
     }
 
-    // 3. 通用样式激活切换：给目标 .page 加 active，移除其他 .page 的 active
+    // 3. 通用激活切换：同时覆盖 .page 与 .tab-content 两种约定
     const targetPageContainer = iframeDoc.getElementById(inlinePageId);
-    if (targetPageContainer && targetPageContainer.classList.contains("page")) {
-      iframeDoc.querySelectorAll(".page").forEach((el) => el.classList.remove("active"));
-      targetPageContainer.classList.add("active");
-      setScrollVersion((v) => v + 1);
-      return true;
+    if (targetPageContainer) {
+      const group = targetPageContainer.classList.contains("tab-content")
+        ? ".tab-content"
+        : targetPageContainer.classList.contains("page")
+        ? ".page"
+        : null;
+      if (group) {
+        iframeDoc.querySelectorAll(group).forEach((el) => el.classList.remove("active"));
+        targetPageContainer.classList.add("active");
+        return true;
+      }
     }
 
     return false;
@@ -338,43 +279,28 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
   const scheduleScrollToComment = useCallback((targetComment: Comment) => {
     // 优先尝试触发内联子页面切换
     switchInlinePageIfNeeded(targetComment);
+    layerRef.current?.reconcile();
 
     let attempts = 0;
-    const maxAttempts = 10;
-    const tryScroll = () => {
-      attempts++;
+    const maxAttempts = 8;
+    const tryFocus = () => {
+      attempts += 1;
       const iframeDoc = iframeRef.current?.contentDocument;
-      if (!iframeDoc) {
-        if (attempts < maxAttempts) setTimeout(tryScroll, 100);
+      const layer = layerRef.current;
+
+      if (layer && iframeDoc && resolveAnchor(iframeDoc, targetComment.target)) {
+        layer.focusComment(targetComment);
         return;
       }
-
-      let el: HTMLElement | null = null;
-      if (targetComment.target) {
-        el = findBestMatchingElement(
-          iframeDoc,
-          targetComment.target,
-          targetComment.docX,
-          targetComment.docY
-        );
-      }
-
-      if (el && isElementVisibleInDOM(el, iframeDoc)) {
-        performScrollToComment(targetComment);
-      } else if (attempts < maxAttempts) {
-        // 如果依然未处于可见状态，再次尝试切页或等待渲染
-        if (attempts === 2) {
-          switchInlinePageIfNeeded(targetComment);
-        }
-        setTimeout(tryScroll, 80 + attempts * 40);
-      } else {
-        // 达到最大重试次数，执行定位居中
-        performScrollToComment(targetComment);
+      if (attempts < maxAttempts) {
+        // 如果依然解析不出锚点，再次尝试切页或等待渲染
+        if (attempts === 2) switchInlinePageIfNeeded(targetComment);
+        setTimeout(tryFocus, 100);
       }
     };
 
-    tryScroll();
-  }, [performScrollToComment, switchInlinePageIfNeeded]);
+    tryFocus();
+  }, [switchInlinePageIfNeeded]);
 
   // 规范化路径用于比较
   const normalizePath = (p?: string) => {
@@ -426,12 +352,11 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
       if (!relPath) relPath = "index.html";
 
       setCurrentSubPath((prev) => (prev !== relPath ? relPath : prev));
-      setScrollVersion((v) => v + 1);
 
-      // 如果有待滚动的评论，且当前路径已与目标匹配，立即启动多阶定位探测
+      // 如果有待滚动的评论，且当前路径已与目标匹配，立即启动定位探测
       if (pendingScrollCommentIdRef.current) {
         const targetId = pendingScrollCommentIdRef.current;
-        const targetComment = comments.find((c) => c.id === targetId);
+        const targetComment = latestRef.current.comments.find((c) => c.id === targetId);
         if (targetComment && normalizePath(targetComment.pagePath) === normalizePath(relPath)) {
           pendingScrollCommentIdRef.current = null;
           scheduleScrollToComment(targetComment);
@@ -440,11 +365,32 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     } catch (err) {
       // ignore
     }
-  }, [currentVersion, bindIframeKeyboard, comments, scheduleScrollToComment]);
+  }, [currentVersion, bindIframeKeyboard, scheduleScrollToComment]);
 
-  // iframe 加载完成事件：挂载事件监听与 MutationObserver 动态突变感知
+  // 状态变化通过 reconcile 推给浮窗层，滚动与原型内部抖动完全不进 React
+  useEffect(() => {
+    layerRef.current?.reconcile();
+  }, [comments, activeCommentId, currentSubPath, isSidebarOpen]);
+
+  // 批注模式开关同步到浮窗层
+  useEffect(() => {
+    layerRef.current?.setAddMode(isAddingComment);
+  }, [isAddingComment]);
+
+  // 组件卸载时拆除浮窗层，还原注入元素与 position 补写
+  useEffect(
+    () => () => {
+      layerRef.current?.dispose();
+      layerRef.current = null;
+      if (import.meta.env.DEV) delete (window as unknown as Record<string, unknown>).__wbPinLayer;
+    },
+    []
+  );
+
+  // iframe 加载完成事件：绑定原型内部的事件监听
   const handleIframeLoad = () => {
     syncIframePageAndScroll();
+    ensureLayer();
 
     try {
       const iframeWin = iframeRef.current?.contentWindow;
@@ -452,45 +398,15 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
       if (iframeWin && iframeDoc) {
         bindIframeKeyboard();
 
-        let scrollTicking = false;
-        const onScroll = () => {
-          if (!scrollTicking) {
-            scrollTicking = true;
-            requestAnimationFrame(() => {
-              setScrollVersion((v) => v + 1);
-              scrollTicking = false;
-            });
-          }
-        };
         const onHashChange = () => syncIframePageAndScroll();
-
-        iframeWin.addEventListener("scroll", onScroll, { passive: true });
-        iframeWin.addEventListener("resize", onScroll, { passive: true });
         iframeWin.addEventListener("hashchange", onHashChange);
         iframeWin.addEventListener("popstate", onHashChange);
-
-        iframeDoc.addEventListener("click", () => {
-          setTimeout(syncIframePageAndScroll, 60);
-        });
-
-        // 核心技术点：挂载 MutationObserver 实时监听原型内部的内联页面切换与显隐变化
-        if (iframeDoc.body) {
-          const domObserver = new MutationObserver(() => {
-            setScrollVersion((v) => v + 1);
-          });
-          domObserver.observe(iframeDoc.body, {
-            attributes: true,
-            attributeFilter: ["class", "style", "hidden"],
-            subtree: true,
-            childList: true
-          });
-        }
 
         // 检查是否有挂起的跨文件定位评论
         if (pendingScrollCommentIdRef.current) {
           const targetId = pendingScrollCommentIdRef.current;
           pendingScrollCommentIdRef.current = null;
-          const targetComment = comments.find((c) => c.id === targetId);
+          const targetComment = latestRef.current.comments.find((c) => c.id === targetId);
           if (targetComment) {
             scheduleScrollToComment(targetComment);
           }
@@ -502,7 +418,7 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
   };
 
   useEffect(() => {
-    const timer = setInterval(syncIframePageAndScroll, 600);
+    const timer = setInterval(syncIframePageAndScroll, 1000);
     return () => clearInterval(timer);
   }, [syncIframePageAndScroll]);
 
@@ -525,38 +441,88 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     }
   };
 
-  const handleAddCommentSubmit = async (params: {
-    pagePath: string;
-    xPercent: number;
-    yPercent: number;
-    docX: number;
-    docY: number;
-    target?: CommentTargetInfo;
-    content: string;
-  }) => {
+  // 浮窗层提交草稿后的落库逻辑。失败时向上抛，由浮窗层保留草稿以便重试
+  const handleDraftSubmit = useCallback(async (payload: DraftPayload) => {
+    const latest = latestRef.current;
     try {
-      const newComment = await api.addComment(proto.id, {
-        versionId: selectedVersionId,
-        pagePath: params.pagePath || currentSubPath,
-        xPercent: params.xPercent,
-        yPercent: params.yPercent,
-        docX: params.docX,
-        docY: params.docY,
-        target: params.target,
-        content: params.content,
+      const newComment = await api.addComment(latest.proto.id, {
+        versionId: latest.selectedVersionId,
+        pagePath: payload.pagePath || latest.currentSubPath,
+        target: payload.target,
+        content: payload.content,
         author: {
-          name: account.name,
-          avatar: account.avatar
+          name: latest.account.name,
+          avatar: latest.account.avatar
         }
       });
       setComments((prev) => [...prev, newComment]);
       setActiveCommentId(newComment.id);
       setIsSidebarOpen(true);
-      setScrollVersion((v) => v + 1);
+      setIsAddingComment(false);
     } catch (err: any) {
       alert(err.message || "评论发表失败");
+      throw err;
     }
-  };
+  }, []);
+
+  // iframe 文档就绪后重建浮窗层。浮窗直接注入 iframe 文档，iframe 每次加载都必须重新挂载
+  const ensureLayer = useCallback(() => {
+    const iframe = iframeRef.current;
+    const doc = iframe?.contentDocument;
+    const win = iframe?.contentWindow;
+    if (!doc || !win || !doc.body) return;
+
+    // 导航尚未开始时 contentDocument 是 about:blank，它同样有 body，必须先排除
+    try {
+      const href = win.location.href;
+      if (!href || href === "about:blank") return;
+    } catch {
+      return;
+    }
+
+    if (layerRef.current?.isBoundTo(doc)) return;
+
+    layerRef.current?.dispose();
+
+    const layer = new CommentPinLayer({
+      doc,
+      win,
+      getComments: () => latestRef.current.comments,
+      getCurrentPath: () => latestRef.current.currentSubPath,
+      getActiveCommentId: () => latestRef.current.activeCommentId,
+      isPinsVisible: () => latestRef.current.isSidebarOpen,
+      onSelectComment: (id) => setActiveCommentId(id),
+      onSubmitDraft: handleDraftSubmit
+    });
+
+    layerRef.current = layer;
+    layer.setAddMode(latestRef.current.isAddingComment);
+    layer.mount();
+
+    // 开发期诊断钩子：window.__wbPinLayer.debugSnapshot()
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__wbPinLayer = layer;
+    }
+  }, [handleDraftSubmit]);
+
+  // iframe 命中缓存时 onLoad 可能先于 React 挂载监听触发，这里做一次有限重试兜底
+  useEffect(() => {
+    let attempts = 0;
+    let timer: number | undefined;
+
+    const tryEnsure = () => {
+      attempts += 1;
+      ensureLayer();
+      if (!layerRef.current?.isBoundTo(iframeRef.current?.contentDocument ?? null) && attempts < 10) {
+        timer = window.setTimeout(tryEnsure, 200);
+      }
+    };
+
+    tryEnsure();
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [currentVersion, refreshKey, ensureLayer]);
 
   const handleToggleCommentStatus = async (
     commentId: string,
@@ -620,6 +586,7 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
   };
 
   const openCount = comments.filter((c) => c.status === "open").length;
+  const versionsDesc = [...proto.versions].sort((a, b) => b.versionNumber - a.versionNumber);
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-900 text-slate-100 font-sans">
@@ -627,7 +594,7 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
       {/* 面板展开时抬高层级，避免被批注吸附气泡（z-40）压住 */}
       <header
         className={`h-14 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 flex items-center justify-between shrink-0 select-none shadow-md ${
-          isAttachmentPanelOpen ? "z-50" : "z-20"
+          isAttachmentPanelOpen || isVersionNotePanelOpen ? "z-50" : "z-20"
         }`}
       >
         {/* 左侧：返回与原型信息 */}
@@ -646,6 +613,12 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
             <h2 className="font-bold text-slate-100 text-sm truncate max-w-[200px]" title={proto.name}>
               {proto.name}
             </h2>
+
+            {/* 当前页面名称 */}
+            <div className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/50 text-[11px] text-slate-300">
+              <Compass className="w-3 h-3 text-indigo-400 shrink-0" />
+              <span className="font-mono truncate max-w-[160px]">{currentSubPath}</span>
+            </div>
 
             {/* 版本切换下拉选择 */}
             <div className="relative">
@@ -666,10 +639,52 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
               <ChevronDown className="w-3.5 h-3.5 text-indigo-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
 
-            {/* 当前原型子页面标识 */}
-            <div className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/50 text-[11px] text-slate-300">
-              <Compass className="w-3 h-3 text-indigo-400 shrink-0" />
-              <span className="font-mono truncate max-w-[160px]">{currentSubPath}</span>
+            {/* 版本更新说明：点击查看各版本更新日志 */}
+            <div className="relative shrink-0" ref={versionNotePanelRef}>
+              <button
+                onClick={() => setIsVersionNotePanelOpen((prev) => !prev)}
+                title="版本更新说明"
+                className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-semibold border transition-all ${
+                  isVersionNotePanelOpen
+                    ? "bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/30"
+                    : "bg-slate-800/90 text-slate-300 border-slate-700/80 hover:text-white hover:border-indigo-500/50"
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>版本说明</span>
+              </button>
+
+              {isVersionNotePanelOpen && (
+                <div className="absolute left-0 top-full mt-2 z-50 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-1 pb-2 mb-2 border-b border-slate-100">
+                    <span className="text-[11px] font-bold text-slate-600">版本更新说明</span>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto space-y-2">
+                    {versionsDesc.map((ver) => (
+                      <div
+                        key={ver.id}
+                        className={`px-2.5 py-2 rounded-xl border ${
+                          ver.id === selectedVersionId
+                            ? "border-indigo-200 bg-indigo-50"
+                            : "border-slate-100 bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-700">
+                            {ver.versionLabel}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(ver.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-slate-600 whitespace-pre-wrap break-words">
+                          {ver.changelog || "无更新说明"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 关联附件：左上信息区最右侧，点击展开 */}
@@ -855,26 +870,7 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
 
-            {/* 元素锚定与视口跟随批注图层 */}
-            <ErrorBoundary
-              fallbackTitle="批注图层暂时遇到重载"
-              onReset={() => setScrollVersion((v) => v + 1)}
-            >
-              <CommentOverlay
-                iframeRef={iframeRef}
-                currentSubPath={currentSubPath}
-                scrollVersion={scrollVersion}
-                comments={comments}
-                isAddingComment={isAddingComment}
-                pinsVisible={isSidebarOpen}
-                onExitAddMode={() => setIsAddingComment(false)}
-                activeCommentId={activeCommentId}
-                onSelectComment={(id) => {
-                  setActiveCommentId(id);
-                }}
-                onSubmitNewComment={handleAddCommentSubmit}
-              />
-            </ErrorBoundary>
+            {/* 批注浮窗由 CommentPinLayer 直接注入 iframe 文档，此处不再有覆盖层 */}
           </div>
         </main>
 
@@ -889,7 +885,6 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
           onToggleStatus={handleToggleCommentStatus}
           onAddReply={handleAddReply}
           onDeleteComment={handleDeleteComment}
-          onNavigateToPage={handleNavigateToPage}
           currentVersionLabel={currentVersion?.versionLabel || "v1.0"}
           account={account}
         />

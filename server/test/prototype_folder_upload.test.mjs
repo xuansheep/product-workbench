@@ -250,4 +250,34 @@ describe("原型文件夹 / 多文件上传", { timeout: 20000 }, () => {
       assert.deepStrictEqual(leftovers, [], `${protoId} 残留 staging 目录`);
     }
   });
+
+  it("12. 磁盘残留同名版本目录时不覆盖，新版本另起目录", async () => {
+    const created = await uploadFolder({ "residue/index.html": "<h1>v1</h1>" }, { name: "残留目录测试" });
+    assert.strictEqual(created.status, 201);
+    const protoId = created.body.data.id;
+
+    // 模拟数据文件与磁盘漂移：v2 目录已存在，但版本记录里没有它
+    const staleDir = path.join(prototypesDir, protoId, "v2");
+    fs.mkdirSync(staleDir, { recursive: true });
+    fs.writeFileSync(path.join(staleDir, "stale.html"), "stale");
+
+    // Windows 上 rename 到已存在的非空目录会直接 EPERM，这里必须能正常发布
+    const res = await fetch(`${baseUrl}/api/prototypes/${protoId}/versions`, {
+      method: "POST",
+      body: folderForm({ "residue2/index.html": "<h1>v2</h1>" }, { changelog: "第二版" })
+    });
+
+    assert.strictEqual(res.status, 201);
+    const version = (await res.json()).data.versions[0];
+    assert.strictEqual(version.versionLabel, "v2.0");
+    assert.notStrictEqual(version.storageDir, `/prototypes/${protoId}/v2`);
+
+    // 新版本落在别的目录，残留目录原样保留
+    const landedDir = path.join(prototypesDir, protoId, path.basename(version.storageDir));
+    assert.ok(fs.existsSync(path.join(landedDir, "index.html")));
+    assert.ok(fs.existsSync(path.join(staleDir, "stale.html")), "残留目录被误删");
+
+    const staticRes = await fetch(`${baseUrl}/static${version.storageDir}/${version.entryFile}`);
+    assert.strictEqual(staticRes.status, 200);
+  });
 });

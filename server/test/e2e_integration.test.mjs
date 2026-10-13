@@ -120,15 +120,34 @@ describe("Product Workbench End-to-End API Integration Suite", { timeout: 15000 
     const v2HtmlContent = await v2StaticRes.text();
     assert.ok(v2HtmlContent.includes("仪表盘原型 v2.0 升级版"));
 
-    // 2.7 任意坐标评论
+    // 2.7 元素锚定评论（无 target 时服务端应拒绝）
+    const noTargetRes = await fetch(`${baseUrl}/api/comments/prototype/${protoData.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        versionId: v2ProtoData.currentVersionId,
+        pagePath: "index.html",
+        content: "缺少锚定目标的批注",
+        author: { name: "资深产品经理", avatar: "avatar-pm-1" }
+      })
+    });
+    assert.strictEqual(noTargetRes.status, 400);
+
     const commentRes = await fetch(`${baseUrl}/api/comments/prototype/${protoData.id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         versionId: v2ProtoData.currentVersionId,
         pagePath: "index.html",
-        xPercent: 50.5,
-        yPercent: 30.2,
+        target: {
+          anchorKind: "element",
+          viewContainerSelector: "#page-overview",
+          selector: "div.kpi-card:nth-of-type(2)",
+          tagName: "DIV",
+          innerTextSnippet: "指标卡片",
+          elementOffsetXPercent: 50,
+          elementOffsetYPercent: 30
+        },
         content: "这里的指标卡片数字在小屏下建议缩小2号字",
         author: {
           name: "资深产品经理",
@@ -140,6 +159,7 @@ describe("Product Workbench End-to-End API Integration Suite", { timeout: 15000 
     const commentData = (await commentRes.json()).data;
     assert.strictEqual(commentData.content, "这里的指标卡片数字在小屏下建议缩小2号字");
     assert.strictEqual(commentData.status, "open");
+    assert.strictEqual(commentData.target.selector, "div.kpi-card:nth-of-type(2)");
 
     // 2.8 添加回复
     const replyRes = await fetch(`${baseUrl}/api/comments/${commentData.id}/replies`, {

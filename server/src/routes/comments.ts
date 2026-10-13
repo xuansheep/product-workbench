@@ -1,9 +1,16 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import { store } from "../db/store.js";
-import type { Comment, CommentReply } from "../types.js";
+import type { Comment, CommentReply, CommentTargetInfo } from "../types.js";
 
 const router = Router();
+
+// 批注必须带可锚定目标，否则注入层无法定位，会产生无法渲染的批注
+function isAnchorable(target: unknown): boolean {
+  if (!target || typeof target !== "object") return false;
+  const t = target as CommentTargetInfo;
+  return Boolean(t.selector || t.viewContainerSelector || t.inlinePageId);
+}
 
 // 获取指定原型的所有评论（支持 ?versionId 过滤）
 router.get("/prototype/:protoId", (req, res) => {
@@ -12,7 +19,7 @@ router.get("/prototype/:protoId", (req, res) => {
   res.json({ success: true, data: list });
 });
 
-// 新增批注（支持元素吸附与文档级绝对坐标）
+// 新增批注（锚定到原型内部 DOM，位置由布局引擎保证）
 router.post("/prototype/:protoId", (req, res) => {
   const { protoId } = req.params;
   const proto = store.getPrototypeById(protoId);
@@ -20,12 +27,12 @@ router.post("/prototype/:protoId", (req, res) => {
     return res.status(404).json({ success: false, message: "原型不存在" });
   }
 
-  const { versionId, pagePath, xPercent, yPercent, docX, docY, target, content, author } = req.body;
+  const { versionId, pagePath, target, content, author } = req.body;
   if (!content || !content.trim()) {
     return res.status(400).json({ success: false, message: "评论内容不能为空" });
   }
-  if (typeof xPercent !== "number" || typeof yPercent !== "number") {
-    return res.status(400).json({ success: false, message: "批注坐标参数无效" });
+  if (!isAnchorable(target)) {
+    return res.status(400).json({ success: false, message: "批注缺少可锚定目标" });
   }
 
   const comment: Comment = {
@@ -33,11 +40,7 @@ router.post("/prototype/:protoId", (req, res) => {
     prototypeId: protoId,
     versionId: versionId || proto.currentVersionId,
     pagePath: (pagePath || "index.html").trim(),
-    xPercent: Math.max(0, Math.min(100, xPercent)),
-    yPercent: Math.max(0, Math.min(100, yPercent)),
-    docX: typeof docX === "number" ? docX : undefined,
-    docY: typeof docY === "number" ? docY : undefined,
-    target: target && typeof target === "object" ? target : undefined,
+    target: target as CommentTargetInfo,
     content: content.trim(),
     author: {
       name: author?.name?.trim() || "匿名成员",

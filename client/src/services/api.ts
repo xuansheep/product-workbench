@@ -62,11 +62,7 @@ export const api = {
     data: {
       versionId: string;
       pagePath: string;
-      xPercent: number;
-      yPercent: number;
-      docX?: number;
-      docY?: number;
-      target?: CommentTargetInfo;
+      target: CommentTargetInfo;
       content: string;
       author: { name: string; avatar: string };
     }

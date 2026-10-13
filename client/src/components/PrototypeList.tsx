@@ -601,7 +601,7 @@ export const PrototypeList: React.FC<PrototypeListProps> = ({
                   onChange={(e) => setChangelog(e.target.value)}
                   placeholder="记录本次上传所包含的功能改动..."
                   rows={2}
-                  maxLength={150}
+                  maxLength={1000}
                   className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none text-slate-900 bg-white"
                 />
               </div>

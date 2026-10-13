@@ -65,8 +65,27 @@ function buildVersionDir(
   versionDir: string
 ): StagedPrototype {
   const staged = stagePrototypeFiles(collected.mode, collected.files, stagingDir);
-  fs.renameSync(stagingDir, versionDir);
+  moveDirectory(stagingDir, versionDir);
   return staged;
+}
+
+/**
+ * 版本目录名优先取 v{n}。Windows 的 rename 拒绝覆盖已存在的非空目录（EPERM），
+ * 而磁盘上可能残留数据文件已不再记录的版本目录，因此被占用时退到带随机后缀的名字，绝不覆盖。
+ */
+function claimVersionDir(protoDir: string, preferredName: string): string {
+  if (!fs.existsSync(path.join(protoDir, preferredName))) return preferredName;
+  return `${preferredName}-${crypto.randomUUID().slice(0, 4)}`;
+}
+
+// rename 可能被杀软、索引器对新写入目录的临时占用挡住，退化为拷贝
+function moveDirectory(source: string, destination: string): void {
+  try {
+    fs.renameSync(source, destination);
+  } catch {
+    fs.cpSync(source, destination, { recursive: true });
+    removeDirQuietly(source);
+  }
 }
 
 // 获取指定项目下的原型列表
@@ -103,7 +122,8 @@ router.post("/upload", receiveUpload, (req, res) => {
     const protoId = `proto-${crypto.randomUUID().slice(0, 8)}`;
     const versionId = `v-1-${crypto.randomUUID().slice(0, 6)}`;
     protoDir = path.join(STORAGE_DIR, "prototypes", protoId);
-    versionDir = path.join(protoDir, "v1");
+    const versionDirName = claimVersionDir(protoDir, "v1");
+    versionDir = path.join(protoDir, versionDirName);
     stagingDir = path.join(protoDir, `.staging-${crypto.randomUUID().slice(0, 8)}`);
 
     const { entryFile, folderRootName } = buildVersionDir(collected, stagingDir, versionDir);
@@ -115,7 +135,7 @@ router.post("/upload", receiveUpload, (req, res) => {
       versionLabel: "v1.0",
       changelog: changelog?.trim() || "初始版本上传",
       entryFile,
-      storageDir: `/prototypes/${protoId}/v1`,
+      storageDir: `/prototypes/${protoId}/${versionDirName}`,
       createdAt: new Date().toISOString()
     };
 
@@ -170,7 +190,9 @@ router.post("/:id/versions", receiveUpload, (req, res) => {
     const nextVersionNum = Math.max(proto.versions.length, maxVersionNum) + 1;
     const versionId = `v-${nextVersionNum}-${crypto.randomUUID().slice(0, 6)}`;
     const protoDir = path.join(STORAGE_DIR, "prototypes", proto.id);
-    versionDir = path.join(protoDir, `v${nextVersionNum}`);
+    // 数据文件与磁盘可能漂移，抢占空位而不是沿用可能已被占用的 v{n}
+    const versionDirName = claimVersionDir(protoDir, `v${nextVersionNum}`);
+    versionDir = path.join(protoDir, versionDirName);
     stagingDir = path.join(protoDir, `.staging-${crypto.randomUUID().slice(0, 8)}`);
 
     const { entryFile } = buildVersionDir(collected, stagingDir, versionDir);
@@ -181,7 +203,7 @@ router.post("/:id/versions", receiveUpload, (req, res) => {
       versionLabel: `v${nextVersionNum}.0`,
       changelog: changelog?.trim() || `更新版本 v${nextVersionNum}.0`,
       entryFile,
-      storageDir: `/prototypes/${proto.id}/v${nextVersionNum}`,
+      storageDir: `/prototypes/${proto.id}/${versionDirName}`,
       createdAt: new Date().toISOString()
     };
 
@@ -194,7 +216,7 @@ router.post("/:id/versions", receiveUpload, (req, res) => {
     return res.status(201).json({ success: true, data: proto });
   } catch (err) {
     removeDirQuietly(stagingDir);
-    // 不删 protoDir —— 该原型已存在且已在库中
+    // 不删 protoDir —— 该原型已存在且已在库中；versionDir 是本次抢占的空位，删掉不会误伤旧版本
     if (!committed) removeDirQuietly(versionDir);
     const { status, message } = toErrorResponse(err, "新版本解压失败");
     return res.status(status).json({ success: false, message });

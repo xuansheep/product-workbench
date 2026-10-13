@@ -45,7 +45,11 @@ export interface CommentReply {
 }
 
 export interface CommentTargetInfo {
-  selector?: string;
+  anchorKind?: "element" | "container"; // 缺省时按 selector 是否存在推断
+  selector?: string; // element 锚点：相对 viewContainerSelector 作用域的选择器
+  viewContainerSelector?: string; // 视图容器选择器，锚点解析的硬边界
+  containerOffsetXPercent?: number; // container 锚点：相对容器 padding box 的 X% 偏移 (0-100)
+  containerOffsetYPercent?: number; // container 锚点：相对容器 padding box 的 Y% 偏移 (0-100)
   tagName?: string;
   innerTextSnippet?: string;
   elementOffsetXPercent?: number;
@@ -58,10 +62,10 @@ export interface Comment {
   prototypeId: string;
   versionId: string;
   pagePath: string;
-  xPercent: number;
-  yPercent: number;
-  docX?: number;
-  docY?: number;
+  xPercent?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
+  yPercent?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
+  docX?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
+  docY?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
   target?: CommentTargetInfo;
   content: string;
   author: CommentAuthor;
