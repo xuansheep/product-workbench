@@ -45,14 +45,18 @@ export interface CommentReply {
 export interface CommentTargetInfo {
   anchorKind?: "element" | "container"; // 缺省时按 selector 是否存在推断
   selector?: string;             // element 锚点：相对 viewContainerSelector 作用域的选择器
-  viewContainerSelector?: string;// 视图容器选择器，锚点解析的硬边界
+  viewContainerSelector?: string;// 最内层视图容器，selector 的作用域
+  pageContainerSelector?: string;// 最外层视图容器，跨页跳转的落点
+  containerSignature?: string;   // 页面级容器的内容指纹（结构骨架 + 文本摘要），判定锚点是否还指向原处
+  containerTokens?: string[];    // 页面级容器里带数字的标识，仅用于定位时给候选控件排序
+  elementPath?: string;          // 从文档根到目标的完整结构路径，容器判据不成立时按它 + 文本指纹回退再找
   containerOffsetXPercent?: number; // container 锚点：相对容器 padding box 的 X% 偏移 (0-100)
   containerOffsetYPercent?: number; // container 锚点：相对容器 padding box 的 Y% 偏移 (0-100)
   tagName?: string;              // BUTTON, DIV, INPUT 等
   innerTextSnippet?: string;     // 目标元素文本前缀，如 "立即接单"
   elementOffsetXPercent?: number;// 相对目标元素内部的 X% 偏移 (0-100)
   elementOffsetYPercent?: number;// 相对目标元素内部的 Y% 偏移 (0-100)
-  inlinePageId?: string;         // 所属内联页面/视图容器标识（如 page-overview）
+  inlinePageId?: string;         // 最外层视图容器的 id（如 page-device），跨页跳转时用来拼原型自身的 go(key)
 }
 
 export interface Comment {

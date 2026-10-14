@@ -207,6 +207,7 @@ export const CommentSidebar: React.FC<CommentSidebarProps> = ({
               const isResolved = comment.status === "resolved";
               const isActive = comment.id === activeCommentId;
               const isDifferentPage = norm(comment.pagePath) !== currNorm;
+              // 浮窗层按"文件"口径判定归属（剥掉 hash），侧栏按完整路径筛选，这里必须用侧栏自己的口径再确认一次
               const avatarInfo =
                 PRESET_AVATARS.find((a) => a.id === comment.author.avatar) || PRESET_AVATARS[0];
 

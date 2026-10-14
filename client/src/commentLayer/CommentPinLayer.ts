@@ -3,6 +3,7 @@ import {
   buildAnchorDescriptor,
   containerSelectorOf,
   findAnchorElement,
+  invalidateContainerSignatures,
   normalizeTableTarget,
   resolveAnchor
 } from "../utils/commentAnchor.js";
@@ -510,6 +511,8 @@ export class CommentPinLayer {
     if (this.selfWriteDepth > 0) return;
     for (const record of records) {
       if (!this.isOwnRecord(record)) {
+        // 原型动了 DOM，容器内容指纹可能已变，作废缓存让本轮重算
+        invalidateContainerSignatures();
         this.reconcile();
         return;
       }
