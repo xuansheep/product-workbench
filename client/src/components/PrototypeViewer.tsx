@@ -278,6 +278,9 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
     });
     if (fromEditing || fromLayer) return;
 
+    // 带修饰键的组合键(如 Ctrl+C 复制)交还浏览器处理
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
     if (e.key === "c" || e.key === "C") {
       e.preventDefault();
       setIsAddingComment((prev) => !prev);
