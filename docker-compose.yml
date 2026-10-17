@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  product-workbench:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: product-workbench:latest
+    container_name: product-workbench
+    restart: unless-stopped
+    ports:
+      - "9030:9030"
+    volumes:
+      # 绑定宿主机 ./storage 目录：业务数据有 data.json、prototypes/ 与 attachments/ 三处，
+      # 备份、迁移、排查都直接在宿主机上完成。存储层为本地 JSON 文件（原子 rename 落盘），
+      # 不再依赖 SQLite WAL 所需的文件锁与 mmap，NFS / SMB / FUSE 共享目录同样可用。
+      - ./storage:/app/storage
+    environment:
+      - PORT=9030
+      - NODE_ENV=production
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9030/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,156 @@
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  prototypeCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PrototypeVersion {
+  id: string;
+  versionNumber: number;
+  versionLabel: string;
+  changelog: string;
+  entryFile: string;
+  storageDir: string;
+  createdAt: string;
+}
+
+export interface Prototype {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  currentVersionId: string;
+  versions: PrototypeVersion[];
+  isDeleted: boolean;
+  deletedAt: string | null;
+  projectName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommentAuthor {
+  name: string;
+  avatar: string;
+}
+
+export interface CommentReply {
+  id: string;
+  commentId: string;
+  content: string;
+  author: CommentAuthor;
+  createdAt: string;
+}
+
+export interface CommentTargetInfo {
+  anchorKind?: "element" | "container"; // 缺省时按 selector 是否存在推断
+  selector?: string; // element 锚点：相对 viewContainerSelector 作用域的选择器
+  viewContainerSelector?: string; // 最内层视图容器，selector 的作用域
+  pageContainerSelector?: string; // 最外层视图容器，跨页跳转的落点
+  containerSignature?: string; // 页面级容器的内容指纹（结构骨架 + 文本摘要），判定锚点是否还指向原处
+  containerTokens?: string[]; // 页面级容器里带数字的标识，仅用于定位时给候选控件排序
+  elementPath?: string; // 从文档根到目标的完整结构路径，容器判据不成立时按它 + 文本指纹回退再找
+  containerOffsetXPercent?: number; // container 锚点：相对容器 padding box 的 X% 偏移 (0-100)
+  containerOffsetYPercent?: number; // container 锚点：相对容器 padding box 的 Y% 偏移 (0-100)
+  tagName?: string;
+  innerTextSnippet?: string;
+  elementOffsetXPercent?: number;
+  elementOffsetYPercent?: number;
+  inlinePageId?: string; // 最外层视图容器的 id（如 page-device），跨页跳转时用来拼原型自身的 go(key)
+}
+
+export interface Comment {
+  id: string;
+  prototypeId: string;
+  versionId: string;
+  pagePath: string;
+  xPercent?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
+  yPercent?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
+  docX?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
+  docY?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
+  target?: CommentTargetInfo;
+  content: string;
+  author: CommentAuthor;
+  status: "open" | "resolved";
+  replies: CommentReply[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Attachment {
+  id: string;
+  prototypeId: string;
+  name: string;
+  type: "url" | "file";
+  url?: string;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+  createdAt: string;
+  // 以下两个字段由服务端派生，用于判断点击后是预览还是下载
+  previewable: boolean;
+  rawUrl?: string;
+}
+
+// 与服务端保持一致的单文件上限，仅用于提交前的即时提示，最终以服务端校验为准
+export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+
+// 同理的原型上传限制，服务端可通过环境变量调整，不一致时以服务端返回的中文提示为准
+export const MAX_PROTOTYPE_FILE_SIZE = 20 * 1024 * 1024;
+export const MAX_PROTOTYPE_FOLDER_FILES = 1000;
+export const MAX_PROTOTYPE_TOTAL_SIZE = 200 * 1024 * 1024;
+
+export interface UserAccount {
+  id: string;
+  name: string;
+  avatar: string;
+  role?: string;
+  color: string;
+}
+
+export interface PresetAvatar {
+  id: string;
+  label: string;
+  emoji: string;
+  bg: string;
+}
+
+export const PRESET_AVATARS: PresetAvatar[] = [
+  // 1-12: 兼容历史已有头像 ID
+  { id: "avatar-pm-1", label: "冲锋火箭", emoji: "🚀", bg: "bg-indigo-500" },
+  { id: "avatar-pm-2", label: "领航罗盘", emoji: "🧭", bg: "bg-blue-500" },
+  { id: "avatar-ui-1", label: "灵感画板", emoji: "🎨", bg: "bg-pink-500" },
+  { id: "avatar-ui-2", label: "闪烁光芒", emoji: "✨", bg: "bg-purple-500" },
+  { id: "avatar-dev-1", label: "敏捷闪电", emoji: "⚡", bg: "bg-emerald-500" },
+  { id: "avatar-dev-2", label: "极客工具", emoji: "🛠️", bg: "bg-cyan-500" },
+  { id: "avatar-qa-1", label: "精细透镜", emoji: "🔍", bg: "bg-amber-500" },
+  { id: "avatar-ops-1", label: "稳固盾牌", emoji: "🛡️", bg: "bg-slate-600" },
+  { id: "avatar-biz-1", label: "商务皮箱", emoji: "💼", bg: "bg-orange-500" },
+  { id: "avatar-ai-1", label: "未来智械", emoji: "🤖", bg: "bg-violet-600" },
+  { id: "avatar-sec-1", label: "安全金锁", emoji: "🔐", bg: "bg-rose-500" },
+  { id: "avatar-guest-1", label: "璀璨星辰", emoji: "🌟", bg: "bg-teal-500" },
+
+  // 13-32: 扩展至 32 个多样化头像
+  { id: "avatar-13", label: "灵动小猫", emoji: "🐱", bg: "bg-amber-600" },
+  { id: "avatar-14", label: "元气小狗", emoji: "🐶", bg: "bg-sky-500" },
+  { id: "avatar-15", label: "聪慧赤狐", emoji: "🦊", bg: "bg-orange-600" },
+  { id: "avatar-16", label: "悠然熊猫", emoji: "🐼", bg: "bg-stone-700" },
+  { id: "avatar-17", label: "威武金狮", emoji: "🦁", bg: "bg-yellow-600" },
+  { id: "avatar-18", label: "梦幻独角兽", emoji: "🦄", bg: "bg-fuchsia-500" },
+  { id: "avatar-19", label: "睿智夜枭", emoji: "🦉", bg: "bg-indigo-600" },
+  { id: "avatar-20", label: "敏捷海豚", emoji: "🐬", bg: "bg-blue-600" },
+  { id: "avatar-21", label: "创新明灯", emoji: "💡", bg: "bg-amber-400" },
+  { id: "avatar-22", label: "聚焦靶心", emoji: "🎯", bg: "bg-red-500" },
+  { id: "avatar-23", label: "极客咖啡", emoji: "☕", bg: "bg-amber-800" },
+  { id: "avatar-24", label: "幸运四叶草", emoji: "🍀", bg: "bg-emerald-600" },
+  { id: "avatar-25", label: "预知晶球", emoji: "🔮", bg: "bg-purple-600" },
+  { id: "avatar-26", label: "恒久纯钻", emoji: "💎", bg: "bg-cyan-600" },
+  { id: "avatar-27", label: "荣耀金杯", emoji: "🏆", bg: "bg-yellow-500" },
+  { id: "avatar-28", label: "沉浸耳机", emoji: "🎧", bg: "bg-violet-500" },
+  { id: "avatar-29", label: "严谨眼镜", emoji: "👓", bg: "bg-slate-700" },
+  { id: "avatar-30", label: "团队拼图", emoji: "🧩", bg: "bg-teal-600" },
+  { id: "avatar-31", label: "初生青芽", emoji: "🌿", bg: "bg-lime-600" },
+  { id: "avatar-32", label: "澎湃浩浪", emoji: "🌊", bg: "bg-sky-600" }
+];
