@@ -95,7 +95,7 @@ export const api = {
     request<{ message: string }>(`/comments/${commentId}`, { method: "DELETE" }),
   addCommentSnapshot: (commentId: string, snapshot: CapturedSnapshot) => {
     const form = new FormData();
-    form.append("image", snapshot.image, "snapshot.jpg");
+    form.append("image", snapshot.image, snapshot.image.type === "image/webp" ? "snapshot.webp" : "snapshot.jpg");
     form.append("width", String(snapshot.viewportWidth));
     form.append("height", String(snapshot.viewportHeight));
     form.append("markerXPercent", String(snapshot.markerXPercent));

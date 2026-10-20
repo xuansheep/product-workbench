@@ -36,7 +36,7 @@ export const CommentSnapshotModal: React.FC<CommentSnapshotModalProps> = ({
 
   return (
     <ModalPortal className="!bg-slate-950/80">
-      <div className="w-full max-w-5xl max-h-[92vh] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="w-full max-w-[min(1500px,94vw)] max-h-[92vh] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-2.5 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
@@ -75,12 +75,18 @@ export const CommentSnapshotModal: React.FC<CommentSnapshotModalProps> = ({
               <p className="text-xs">快照文件已丢失或无法加载</p>
             </div>
           ) : (
-            <div className="relative inline-block leading-none">
+            <div
+              className="relative leading-none"
+              style={{
+                width: `min(100%, calc(72vh * ${snapshot.width / snapshot.height}))`,
+                aspectRatio: `${snapshot.width} / ${snapshot.height}`
+              }}
+            >
               <img
                 src={url}
                 alt={`批注 #${pinNumber} 的页面快照`}
                 onError={() => setFailed(true)}
-                className="block max-w-full max-h-[72vh] w-auto h-auto rounded-lg shadow-xl bg-white"
+                className="block w-full h-full rounded-lg shadow-xl bg-white"
               />
               <span
                 className="absolute z-10 flex items-center justify-center w-[17.5px] h-[17.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-600 text-white text-[9px] font-bold ring-1 ring-white shadow-[0_0_0_2px_rgba(99,102,241,0.3)]"

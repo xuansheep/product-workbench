@@ -186,6 +186,28 @@ describe("Product Workbench End-to-End API Integration Suite", { timeout: 15000 
     assert.strictEqual(snapshotRead.headers.get("content-type"), "image/jpeg");
     assert.deepStrictEqual(Buffer.from(await snapshotRead.arrayBuffer()), snapshotJpeg);
 
+    // 2.7.2 覆盖上传 WebP：按实际格式回源，旧 JPEG 被清理
+    const snapshotWebp = Buffer.from(
+      "UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoIAAgAAkA4JaQAA3AA/vnagAA=",
+      "base64"
+    );
+    const webpForm = new FormData();
+    webpForm.append("image", new File([snapshotWebp], "snapshot.webp", { type: "image/webp" }));
+    webpForm.append("width", "1280");
+    webpForm.append("height", "800");
+    webpForm.append("markerXPercent", "50");
+    webpForm.append("markerYPercent", "50");
+    const webpRes = await fetch(`${baseUrl}/api/comments/${commentData.id}/snapshot`, {
+      method: "POST",
+      body: webpForm
+    });
+    assert.strictEqual(webpRes.status, 201);
+
+    const webpRead = await fetch(`${baseUrl}/api/comments/${commentData.id}/snapshot`);
+    assert.strictEqual(webpRead.status, 200);
+    assert.strictEqual(webpRead.headers.get("content-type"), "image/webp");
+    assert.deepStrictEqual(Buffer.from(await webpRead.arrayBuffer()), snapshotWebp);
+
     // 2.8 添加回复
     const replyRes = await fetch(`${baseUrl}/api/comments/${commentData.id}/replies`, {
       method: "POST",

@@ -8,12 +8,22 @@ export interface CapturedSnapshot {
   markerYPercent: number;
 }
 
-// 截图缩放上限：1.5 倍足够看清原型文字，又不至于让每条批注都存下几 MB 的图
-const MAX_SCALE = 1.5;
-const JPEG_QUALITY = 0.85;
+const SNAPSHOT_QUALITY = 0.85;
 // foreignObject 渲染的是整页，超高/超大的页面先降级，避免生成超大画布
 const MAX_FOREIGN_OBJECT_SIDE = 8000;
 const MAX_FOREIGN_OBJECT_AREA = 12_000_000;
+
+// WebP 编码比 JPEG 快一个数量级且体积更小；Safari 等不支持的浏览器回退 JPEG
+const WEBP_SUPPORTED = (() => {
+  try {
+    const probe = document.createElement("canvas");
+    probe.width = 1;
+    probe.height = 1;
+    return probe.toDataURL("image/webp").startsWith("data:image/webp");
+  } catch {
+    return false;
+  }
+})();
 
 function clampPercent(value: number): number {
   return Math.round(Math.min(100, Math.max(0, value)) * 100) / 100;
@@ -77,28 +87,17 @@ function cropRegion(
   sx: number,
   sy: number,
   width: number,
-  height: number,
-  scale: number
+  height: number
 ): HTMLCanvasElement {
   const output = document.createElement("canvas");
-  output.width = Math.round(width * scale);
-  output.height = Math.round(height * scale);
+  output.width = width;
+  output.height = height;
   const ctx = output.getContext("2d");
   if (!ctx) return source;
-  // JPEG 没有透明通道，先铺白底，避免页面边缘的透明区域变成黑色
+  // 先铺白底，避免页面边缘的透明区域变成黑色
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, output.width, output.height);
-  ctx.drawImage(
-    source,
-    Math.round(sx * scale),
-    Math.round(sy * scale),
-    output.width,
-    output.height,
-    0,
-    0,
-    output.width,
-    output.height
-  );
+  ctx.drawImage(source, sx, sy, width, height, 0, 0, width, height);
   return output;
 }
 
@@ -119,13 +118,14 @@ export async function captureViewportSnapshot(
 
     const scrollX = win.scrollX;
     const scrollY = win.scrollY;
-    const scale = Math.min(MAX_SCALE, Math.max(1, win.devicePixelRatio || 1));
-    const pageWidth = Math.max(doc.documentElement.scrollWidth, doc.documentElement.clientWidth);
-    const pageHeight = Math.max(doc.documentElement.scrollHeight, doc.documentElement.clientHeight);
+    // foreignObject 只能从文档左上角渲染，覆盖到视口右下角即可，不必渲染整页
+    const renderWidth = scrollX + viewportWidth;
+    const renderHeight = scrollY + viewportHeight;
     const options = {
       windowWidth: viewportWidth,
       windowHeight: viewportHeight,
-      scale,
+      // foreignObject 路径不认 scale，会按未缩放尺寸裁切、边缘留白，所以固定 1:1 渲染
+      scale: 1,
       backgroundColor: "#ffffff",
       useCORS: true,
       logging: false,
@@ -135,26 +135,29 @@ export async function captureViewportSnapshot(
 
     let canvas: HTMLCanvasElement;
     if (
-      pageWidth <= MAX_FOREIGN_OBJECT_SIDE &&
-      pageHeight <= MAX_FOREIGN_OBJECT_SIDE &&
-      pageWidth * pageHeight <= MAX_FOREIGN_OBJECT_AREA
+      renderWidth <= MAX_FOREIGN_OBJECT_SIDE &&
+      renderHeight <= MAX_FOREIGN_OBJECT_SIDE &&
+      renderWidth * renderHeight <= MAX_FOREIGN_OBJECT_AREA
     ) {
-      // foreignObject 渲染器不支持 x/y 裁剪（会把平移量叠加两次），所以先整页渲染再自己裁视口。
-      // 好处是让浏览器原生渲染，内联 SVG 图表、渐变不会因为重绘实现而失真
-      const shiftTargets = collectShiftTargets(doc, scrollX, scrollY);
+      // foreignObject 渲染器不支持 x/y 裁剪（会把平移量叠加两次），所以先渲染到视口右下角再自己裁
+      // 未滚动时渲染结果就是视口，直接复用，省掉一次整图拷贝
+      const hasScroll = scrollX > 0 || scrollY > 0;
+      const shiftTargets = hasScroll ? collectShiftTargets(doc, scrollX, scrollY) : [];
       try {
         const page = await html2canvas(doc.body, {
           ...options,
           x: 0,
           y: 0,
-          width: pageWidth,
-          height: pageHeight,
+          width: renderWidth,
+          height: renderHeight,
           scrollX: 0,
           scrollY: 0,
           foreignObjectRendering: true,
           onclone: (cloneDoc) => realignShiftTargets(cloneDoc, shiftTargets)
         });
-        canvas = cropRegion(page, scrollX, scrollY, viewportWidth, viewportHeight, scale);
+        canvas = hasScroll
+          ? cropRegion(page, scrollX, scrollY, viewportWidth, viewportHeight)
+          : page;
       } finally {
         clearShiftTargets(shiftTargets);
       }
@@ -170,8 +173,9 @@ export async function captureViewportSnapshot(
       });
     }
 
+    const mime = WEBP_SUPPORTED ? "image/webp" : "image/jpeg";
     const image = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob((blob) => resolve(blob), "image/jpeg", JPEG_QUALITY);
+      canvas.toBlob((blob) => resolve(blob), mime, SNAPSHOT_QUALITY);
     });
     if (!image) return null;
 

@@ -7,7 +7,8 @@ import { store, STORAGE_DIR } from "../db/store.js";
 import {
   COMMENT_ID_PATTERN,
   MAX_SNAPSHOT_SIZE,
-  isJpegFile,
+  detectSnapshotExt,
+  findSnapshotFile,
   removeSnapshotFile,
   snapshotFilePath
 } from "../utils/commentSnapshot.js";
@@ -118,11 +119,12 @@ router.post("/:commentId/snapshot", (req, res) => {
       if (!meta) {
         return res.status(400).json({ success: false, message: "页面快照参数无效" });
       }
-      if (!isJpegFile(file.path)) {
+      const ext = detectSnapshotExt(file.path);
+      if (!ext) {
         return res.status(400).json({ success: false, message: "页面快照格式无效" });
       }
 
-      const target = snapshotFilePath(comment.id);
+      const target = snapshotFilePath(comment.id, ext);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       try {
         fs.renameSync(file.path, target);
@@ -131,6 +133,8 @@ router.post("/:commentId/snapshot", (req, res) => {
         fs.copyFileSync(file.path, target);
         fs.unlinkSync(file.path);
       }
+      // 覆盖上传时清掉另一种格式，避免回源读到上一次的旧图
+      removeSnapshotFile(comment.id, ext === "webp" ? "jpg" : "webp");
 
       comment.snapshot = { ...meta, capturedAt: new Date().toISOString() };
       comment.updatedAt = comment.snapshot.capturedAt;
@@ -155,15 +159,15 @@ router.get("/:commentId/snapshot", (req, res) => {
     return res.status(404).json({ success: false, message: "页面快照不存在" });
   }
 
-  const file = snapshotFilePath(comment.id);
-  if (!fs.existsSync(file)) {
+  const found = findSnapshotFile(comment.id);
+  if (!found) {
     return res.status(404).json({ success: false, message: "页面快照文件已丢失" });
   }
 
-  res.setHeader("Content-Type", "image/jpeg");
+  res.setHeader("Content-Type", found.ext === "webp" ? "image/webp" : "image/jpeg");
   res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
   res.setHeader("X-Content-Type-Options", "nosniff");
-  res.sendFile(file);
+  res.sendFile(found.file);
 });
 
 // 回复评论
