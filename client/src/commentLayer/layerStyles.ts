@@ -144,8 +144,41 @@ textarea {
 textarea:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
 textarea::placeholder { color: #94a3b8; }
 
-.draft-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
-.hint { font-size: 10px; color: #94a3b8; }
+.draft-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+
+.snapshot-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px;
+  color: #64748b;
+  cursor: pointer;
+  user-select: none;
+}
+.snapshot-toggle input {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.snapshot-toggle .box {
+  display: flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+  flex: none;
+}
+.snapshot-toggle input:checked + .box { background: #4f46e5; border-color: #4f46e5; }
+.snapshot-toggle input:checked + .box::after {
+  content: "";
+  width: 7px; height: 4px;
+  border-left: 1.5px solid #fff;
+  border-bottom: 1.5px solid #fff;
+  transform: rotate(-45deg) translateY(-1px);
+}
+.snapshot-toggle input:focus-visible + .box { box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); }
+.snapshot-toggle input:disabled + .box { opacity: 0.5; }
+
 .submit {
   display: flex; align-items: center; gap: 6px;
   padding: 6px 12px;
@@ -159,6 +192,20 @@ textarea::placeholder { color: #94a3b8; }
 .submit:hover { background: #4338ca; }
 .submit:disabled { opacity: 0.5; cursor: default; }
 .submit svg { width: 12px; height: 12px; }
+.submit.is-loading svg { display: none; }
+.submit.is-loading::before {
+  content: "";
+  box-sizing: border-box;
+  flex: none;
+  width: 12px; height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 9999px;
+  animation: wb-spin 0.7s linear infinite;
+}
+@keyframes wb-spin {
+  to { transform: rotate(360deg); }
+}
 
 /* 批注模式的整页蒙板。fixed 定位只覆盖视口内容区，不需要跟随文档尺寸计算 */
 .mask {

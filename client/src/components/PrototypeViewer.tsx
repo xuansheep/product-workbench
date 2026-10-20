@@ -663,7 +663,7 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
   const handleDraftSubmit = useCallback(async (payload: DraftPayload) => {
     const latest = latestRef.current;
     try {
-      const newComment = await api.addComment(latest.proto.id, {
+      let saved = await api.addComment(latest.proto.id, {
         versionId: latest.selectedVersionId,
         pagePath: payload.pagePath || latest.currentSubPath,
         target: payload.target,
@@ -673,8 +673,18 @@ export const PrototypeViewer: React.FC<PrototypeViewerProps> = ({ proto, onBack,
           avatar: latest.account.avatar
         }
       });
-      setComments((prev) => [...prev, newComment]);
-      setActiveCommentId(newComment.id);
+
+      // 快照是辅助证据：上传失败不阻断批注，否则重试会重复创建评论
+      if (payload.snapshot) {
+        try {
+          saved = await api.addCommentSnapshot(saved.id, payload.snapshot);
+        } catch (err) {
+          console.warn("页面快照保存失败", err);
+        }
+      }
+
+      setComments((prev) => [...prev, saved]);
+      setActiveCommentId(saved.id);
       setIsSidebarOpen(true);
       setIsAddingComment(false);
     } catch (err: any) {

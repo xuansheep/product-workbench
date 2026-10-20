@@ -1,4 +1,5 @@
 import type { Project, Prototype, Comment, CommentReply, CommentTargetInfo, Attachment } from "../types/index.js";
+import type { CapturedSnapshot } from "../utils/commentSnapshot.js";
 
 const BASE_URL = "/api";
 
@@ -92,6 +93,17 @@ export const api = {
     }),
   deleteComment: (commentId: string) =>
     request<{ message: string }>(`/comments/${commentId}`, { method: "DELETE" }),
+  addCommentSnapshot: (commentId: string, snapshot: CapturedSnapshot) => {
+    const form = new FormData();
+    form.append("image", snapshot.image, "snapshot.jpg");
+    form.append("width", String(snapshot.viewportWidth));
+    form.append("height", String(snapshot.viewportHeight));
+    form.append("markerXPercent", String(snapshot.markerXPercent));
+    form.append("markerYPercent", String(snapshot.markerYPercent));
+    return request<Comment>(`/comments/${commentId}/snapshot`, { method: "POST", body: form });
+  },
+  commentSnapshotUrl: (commentId: string, capturedAt: string) =>
+    `${BASE_URL}/comments/${commentId}/snapshot?v=${encodeURIComponent(capturedAt)}`,
 
   // Attachments
   getAttachmentsByProject: (projectId: string) =>

@@ -9,10 +9,13 @@ import {
   Pin,
   Compass,
   ArrowUpRight,
-  Crosshair
+  Crosshair,
+  Camera
 } from "lucide-react";
 import { type Comment, type UserAccount, PRESET_AVATARS } from "../types/index.js";
+import { api } from "../services/api.js";
 import { ConfirmModal } from "./common/ConfirmModal.js";
+import { CommentSnapshotModal } from "./CommentSnapshotModal.js";
 
 interface CommentSidebarProps {
   isOpen: boolean;
@@ -48,6 +51,8 @@ export const CommentSidebar: React.FC<CommentSidebarProps> = ({
 
   // 自定义删除确认弹窗状态
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
+  // 页面快照查看弹窗
+  const [snapshotCommentId, setSnapshotCommentId] = useState<string | null>(null);
 
   const norm = (p?: string) => (p || "index.html").replace(/^\//, "");
   const currNorm = norm(currentSubPath);
@@ -106,6 +111,9 @@ export const CommentSidebar: React.FC<CommentSidebarProps> = ({
 
   const currentCount = comments.filter((c) => norm(c.pagePath) === currNorm).length;
   const openCount = scopedComments.filter((c) => c.status === "open").length;
+  const snapshotComment = snapshotCommentId
+    ? comments.find((c) => c.id === snapshotCommentId) ?? null
+    : null;
 
   if (!isOpen) return null;
 
@@ -214,11 +222,7 @@ export const CommentSidebar: React.FC<CommentSidebarProps> = ({
               return (
                 <div
                   key={comment.id}
-                  onClick={() => {
-                    onSelectComment(comment.id);
-                  }}
-                  title="点击立即在页面中定位到对应位置"
-                  className={`p-4 rounded-2xl border transition-all cursor-pointer group ${
+                  className={`p-4 rounded-2xl border transition-all group ${
                     isActive
                       ? "border-indigo-500 bg-indigo-50/25 shadow-md ring-2 ring-indigo-500/10"
                       : isResolved
@@ -243,17 +247,56 @@ export const CommentSidebar: React.FC<CommentSidebarProps> = ({
                     </div>
 
                     {isDifferentPage ? (
-                      <span className="flex items-center space-x-0.5 text-[10px] text-indigo-600 font-semibold shrink-0 group-hover:underline">
+                      <button
+                        type="button"
+                        onClick={() => onSelectComment(comment.id)}
+                        title="跳转到该页面并定位此批注"
+                        className="flex items-center space-x-0.5 text-[10px] text-indigo-600 font-semibold shrink-0 hover:underline"
+                      >
                         <span>跳转并定位</span>
                         <ArrowUpRight className="w-3 h-3" />
-                      </span>
+                      </button>
                     ) : (
-                      <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center space-x-0.5 text-[10px] text-indigo-500 font-medium shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onSelectComment(comment.id)}
+                        title="在页面中定位此批注"
+                        className="flex items-center space-x-0.5 text-[10px] text-indigo-500 font-medium shrink-0 transition-opacity opacity-0 group-hover:opacity-100 hover:text-indigo-600"
+                      >
                         <span>定位</span>
                         <Crosshair className="w-3 h-3" />
-                      </span>
+                      </button>
                     )}
                   </div>
+
+                  {/* 批注时的页面快照：点击查看大图与批注位置 */}
+                  {comment.snapshot && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSnapshotCommentId(comment.id);
+                      }}
+                      title="查看批注时的页面快照"
+                      className="relative mt-2 w-full h-24 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 group/snap"
+                    >
+                      <img
+                        src={api.commentSnapshotUrl(comment.id, comment.snapshot.capturedAt)}
+                        alt="批注时的页面快照"
+                        loading="lazy"
+                        className="w-full h-full object-cover object-center transition-transform duration-300 group-hover/snap:scale-[1.03]"
+                      />
+                      <span className="absolute inset-x-0 bottom-0 flex items-center justify-between px-2 py-1 bg-gradient-to-t from-slate-900/75 to-transparent text-white text-[10px] font-semibold">
+                        <span className="flex items-center space-x-1">
+                          <Camera className="w-3 h-3" />
+                          <span>批注快照</span>
+                        </span>
+                        <span className="opacity-0 group-hover/snap:opacity-100 transition-opacity">
+                          点击查看
+                        </span>
+                      </span>
+                    </button>
+                  )}
 
                   {/* 头部信息 */}
                   <div className="flex items-start justify-between">
@@ -398,6 +441,15 @@ export const CommentSidebar: React.FC<CommentSidebarProps> = ({
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeletingCommentId(null)}
       />
+
+      {snapshotComment && (
+        <CommentSnapshotModal
+          key={snapshotComment.id}
+          comment={snapshotComment}
+          pinNumber={commentIndexMap.get(snapshotComment.id) || 1}
+          onClose={() => setSnapshotCommentId(null)}
+        />
+      )}
     </>
   );
 };

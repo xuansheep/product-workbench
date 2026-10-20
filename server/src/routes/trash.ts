@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { store, STORAGE_DIR } from "../db/store.js";
 import { removeAttachmentFiles } from "../utils/attachment.js";
+import { removeSnapshotFile } from "../utils/commentSnapshot.js";
 
 const router = Router();
 
@@ -56,6 +57,11 @@ router.delete("/:id/permanent", (req, res) => {
     if (attachment.type === "file") {
       removeAttachmentFiles(attachment.id);
     }
+  }
+
+  // 批注快照同理：记录删除后只剩磁盘上的孤儿图片
+  for (const comment of store.getComments(proto.id)) {
+    removeSnapshotFile(comment.id);
   }
 
   store.permanentDeletePrototype(proto.id);

@@ -9,6 +9,7 @@ import {
 } from "../utils/commentAnchor.js";
 import { makeSheetInstaller } from "./layerStyles.js";
 import { buildCheckIcon, buildCommentCard, buildDraftCard, type DraftCardView } from "./cardView.js";
+import { captureViewportSnapshot, type CapturedSnapshot } from "../utils/commentSnapshot.js";
 
 // 宿主自身不参与布局。只列关键属性：all:initial 的整套重置放在 shadow 的 :host 规则里，
 // 否则浏览器会把 all 展开成数百条声明，让 style 属性膨胀到几 KB
@@ -47,6 +48,8 @@ export interface DraftPayload {
   pagePath: string;
   target: CommentTargetInfo;
   content: string;
+  /** 发表时截取的视口快照；采集失败时为 null */
+  snapshot: CapturedSnapshot | null;
 }
 
 export interface CommentPinLayerOptions {
@@ -628,7 +631,7 @@ export class CommentPinLayer {
 
     const view = buildDraftCard(this.doc, this.opts.getComments().length + 1, label || null, {
       onCancel: () => this.cancelDraft(),
-      onSubmit: (content) => void this.submitDraft(content)
+      onSubmit: (content, includeSnapshot) => void this.submitDraft(content, includeSnapshot)
     });
     for (const type of BLOCKED_EVENTS) {
       view.root.addEventListener(type, (event) => event.stopPropagation());
@@ -643,17 +646,21 @@ export class CommentPinLayer {
     return view;
   }
 
-  private async submitDraft(content: string): Promise<void> {
+  private async submitDraft(content: string, includeSnapshot: boolean): Promise<void> {
     const draft = this.draft;
     if (!draft || this.submitting) return;
 
     this.submitting = true;
     draft.view.setSubmitting(true);
     try {
+      // 截图是同步重活，先让浏览器把 loading 状态画出来再开始，否则按钮会一直停在原样
+      await this.nextPaint();
+      const snapshot = includeSnapshot ? await this.captureDraftSnapshot(draft) : null;
       await this.opts.onSubmitDraft({
         pagePath: this.opts.getCurrentPath(),
         target: draft.target,
-        content
+        content,
+        snapshot
       });
       this.cancelDraft();
     } catch (err) {
@@ -662,6 +669,29 @@ export class CommentPinLayer {
     } finally {
       this.submitting = false;
     }
+  }
+
+  // 双重 rAF：第一帧提交样式，第二帧回调时第一帧已经画完
+  private nextPaint(): Promise<void> {
+    return new Promise((resolve) => {
+      this.win.requestAnimationFrame(() => {
+        this.win.requestAnimationFrame(() => resolve());
+      });
+    });
+  }
+
+  // 快照要带上批注点，先在视口坐标里算出 Pin 中心的实际位置，再交给截图工具
+  private async captureDraftSnapshot(draft: DraftState): Promise<CapturedSnapshot | null> {
+    const el = draft.record.anchorEl;
+    if (!this.doc.contains(el)) return null;
+
+    const rect = el.getBoundingClientRect();
+    const [xPercent, yPercent] = this.computeOffsets(draft.target, el, draft.record.kind);
+    const marker = {
+      x: rect.left + (xPercent / 100) * el.clientWidth,
+      y: rect.top + (yPercent / 100) * el.clientHeight
+    };
+    return captureViewportSnapshot(this.win, this.doc, marker);
   }
 
   private highlightAnchor(rawTarget: HTMLElement, clientX: number, clientY: number): void {

@@ -61,6 +61,14 @@ export interface CommentTargetInfo {
   inlinePageId?: string; // 最外层视图容器的 id（如 page-device），跨页跳转时用来拼原型自身的 go(key)
 }
 
+export interface CommentSnapshot {
+  width: number; // 截图视口宽（CSS px）
+  height: number; // 截图视口高（CSS px）
+  markerXPercent: number; // 批注点在视口中的 X%，用于在快照上还原位置
+  markerYPercent: number; // 批注点在视口中的 Y%
+  capturedAt: string;
+}
+
 export interface Comment {
   id: string;
   prototypeId: string;
@@ -71,6 +79,7 @@ export interface Comment {
   docX?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
   docY?: number; // 已废弃：不再参与渲染定位，仅历史数据保留
   target?: CommentTargetInfo;
+  snapshot?: CommentSnapshot; // 创建批注时的视口快照，缺失表示未采集成功或历史数据
   content: string;
   author: CommentAuthor;
   status: "open" | "resolved";

@@ -161,6 +161,31 @@ describe("Product Workbench End-to-End API Integration Suite", { timeout: 15000 
     assert.strictEqual(commentData.status, "open");
     assert.strictEqual(commentData.target.selector, "div.kpi-card:nth-of-type(2)");
 
+    // 2.7.1 页面快照：JPEG 落盘、元数据回填、按评论 id 原样读回
+    const snapshotJpeg = Buffer.from(
+      "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD2aiiigD//2Q==",
+      "base64"
+    );
+    const snapshotForm = new FormData();
+    snapshotForm.append("image", new File([snapshotJpeg], "snapshot.jpg", { type: "image/jpeg" }));
+    snapshotForm.append("width", "1440");
+    snapshotForm.append("height", "900");
+    snapshotForm.append("markerXPercent", "42.5");
+    snapshotForm.append("markerYPercent", "66.25");
+    const snapshotRes = await fetch(`${baseUrl}/api/comments/${commentData.id}/snapshot`, {
+      method: "POST",
+      body: snapshotForm
+    });
+    assert.strictEqual(snapshotRes.status, 201);
+    const snapshotComment = (await snapshotRes.json()).data;
+    assert.strictEqual(snapshotComment.snapshot.width, 1440);
+    assert.strictEqual(snapshotComment.snapshot.markerYPercent, 66.25);
+
+    const snapshotRead = await fetch(`${baseUrl}/api/comments/${commentData.id}/snapshot`);
+    assert.strictEqual(snapshotRead.status, 200);
+    assert.strictEqual(snapshotRead.headers.get("content-type"), "image/jpeg");
+    assert.deepStrictEqual(Buffer.from(await snapshotRead.arrayBuffer()), snapshotJpeg);
+
     // 2.8 添加回复
     const replyRes = await fetch(`${baseUrl}/api/comments/${commentData.id}/replies`, {
       method: "POST",

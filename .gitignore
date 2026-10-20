@@ -4,6 +4,7 @@ dist/
 .tmp/
 storage/prototypes/
 storage/attachments/
+storage/snapshots/
 storage/data.json
 storage/data.json.tmp
 storage/*.db*

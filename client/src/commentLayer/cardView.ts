@@ -111,7 +111,7 @@ export function buildCommentCard(
 
 export interface DraftCardHandlers {
   onCancel: () => void;
-  onSubmit: (content: string) => void;
+  onSubmit: (content: string, includeSnapshot: boolean) => void;
 }
 
 export interface DraftCardView {
@@ -151,9 +151,18 @@ export function buildDraftCard(
   submit.appendChild(el(doc, "span", undefined, "发表"));
   submit.disabled = true;
 
+  const toggle = el(doc, "label", "snapshot-toggle");
+  toggle.title = "发表时保存当前页面截图";
+  const checkbox = el(doc, "input");
+  checkbox.type = "checkbox";
+  checkbox.checked = true;
+  toggle.appendChild(checkbox);
+  toggle.appendChild(el(doc, "span", "box"));
+  toggle.appendChild(el(doc, "span", undefined, "附加快照"));
+
   const send = () => {
     const content = textarea.value.trim();
-    if (content) handlers.onSubmit(content);
+    if (content) handlers.onSubmit(content, checkbox.checked);
   };
 
   // 拦截一切按键，避免触发宿主或原型的快捷键；Enter 发表，Ctrl/Cmd+Enter 换行，Esc 取消
@@ -184,7 +193,7 @@ export function buildDraftCard(
   submit.addEventListener("click", send);
 
   const foot = el(doc, "div", "draft-foot");
-  foot.appendChild(el(doc, "span", "hint", "Enter 发表 · Ctrl+Enter 换行 · Esc 取消"));
+  foot.appendChild(toggle);
   foot.appendChild(submit);
   card.appendChild(textarea);
   card.appendChild(foot);
@@ -194,7 +203,10 @@ export function buildDraftCard(
     focus: () => textarea.focus({ preventScroll: true }),
     setSubmitting: (submitting: boolean) => {
       submit.disabled = submitting || !textarea.value.trim();
+      submit.classList.toggle("is-loading", submitting);
       submit.querySelector("span")!.textContent = submitting ? "发表中..." : "发表";
+      checkbox.disabled = submitting;
+      textarea.disabled = submitting;
     }
   };
 }
